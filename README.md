@@ -2,8 +2,6 @@
 
 YCCL_LLM是一款基于PMPI层实现的、面向高性能计算通信与大模型通信的MPI通信库。
 
-
-
 ## 安装说明
 
 ```
@@ -34,7 +32,7 @@ YCCL_LLM是一款基于PMPI层实现的、面向高性能计算通信与大模�
    ```
    #!/bin/bash
    
-   # 此处通过
+   # 此处通过库打桩的方式安装基于PMPI的YCCL_LLM库
    export LD_PROLOAD=/path/to/YCCL_LLM/build/lib/libyccl_llm.so
    
    mpirun -n 64 /path/to/install/benchmark/libexec/osu-micro-benchmarks/mpi/osu_allreduce -m 32:268435456 >> test.out
@@ -45,6 +43,3 @@ YCCL_LLM是一款基于PMPI层实现的、面向高性能计算通信与大模�
    可以根据实际想要测试方案和集群环境改写sbatch；
 
 5. 使用集群进行测试运行即可。
-
- ## 参考文献
-
