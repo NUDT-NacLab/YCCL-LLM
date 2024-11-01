@@ -14,9 +14,10 @@
 #include <thread>
 #include <exception>
 #include <vector>
-#include "pt.h"
+#include "include/pt.h"
 #include "allreduce_module.h"
 #include "pjt_include.h"
+#include <list>
 
 // #define CPP20_COROUTINE
 
@@ -28,7 +29,7 @@
 // #define Intra_node_bcast
 
 static int innerf7_ct;
-#define PJT_allreduce_flag_to_index(a) ((a) * 16)
+#define PJT_allreduce_flag_to_index(a) ((a)*16)
 static allreduce_req_content allreduce_req;
 void *sendb, *recvb;
 void reduce_scatter_pipeline(void *sendbuf, void *recvbuf, int count, int elemsz, yhccl_op op, int *counts, int *starts)
@@ -63,7 +64,7 @@ struct intra_node_reduce
 			}
 			else
 			{
-				// 需要测试rank+1，ss位置处的标志位
+				//需要测试rank+1，ss位置处的标志位
 				return (ctx->allreduce_flags[slice_id] == ctx->intra_node_rank);
 			}
 		}
@@ -137,7 +138,7 @@ struct intra_node_broadcast
 	{
 		if (ss < count)
 		{
-			// 需要测试rank+1，ss位置处的标志位
+			//需要测试rank+1，ss位置处的标志位
 			return (ctx->allreduce_flags[slice_id] == ctx->intra_node_procn + 1);
 		}
 		else
@@ -199,21 +200,21 @@ struct inter_node_allreduce1
 		if (ctx->intra_node_rank < (total_slice_ct % inter_node_leadern))
 			my_slice_ct += 1;
 	}
-	// 重点更新， slice_id,wait_slice_id,send_slice_n,recv_slice_n;
+	//重点更新， slice_id,wait_slice_id,send_slice_n,recv_slice_n;
 	bool test()
 	{
 		if (ctx->intra_node_rank < inter_node_leadern)
 		{
-			// 需要测试rank+1，ss位置处的标志位
-			// 节点间通信需要等待两种信号。
-			// 一个是完成节点内规约，允许节点间规约的信号。
+			//需要测试rank+1，ss位置处的标志位
+			//节点间通信需要等待两种信号。
+			//一个是完成节点内规约，允许节点间规约的信号。
 
 			if (recved_slice_n < my_slice_ct)
 			{
 				MPI_Status status;
 				if (recved_slice_n < sended_slice_n)
 				{
-					// 测试
+					//测试
 					int flag = 1;
 					if (ctx->inter_node_procn > 1)
 						MPI_Test(&(reqs[recved_slice_n]), &flag, &status);
@@ -244,8 +245,8 @@ struct inter_node_allreduce1
 			//     }
 			// }
 			return false;
-			// 一个是iallreduce完成信号。
-			//  return (ctx->allreduce_flags[slice_id] == ctx->intra_node_procn);
+			//一个是iallreduce完成信号。
+			// return (ctx->allreduce_flags[slice_id] == ctx->intra_node_procn);
 		}
 		else
 			return false;
@@ -331,9 +332,9 @@ void pjt_memory_bandwidth_efficient_allreduce_callback(int thid, int sig)
 	// int starts[intra_zni_procn];
 	for (int start = thid * slice_sz; start < count; start += slice_sz * thread_ct)
 	{
-		// 先等待slice完成
-		//  sleep(1);
-		//  fprintf(stderr,"ctx->allreduce_flags[%d]=%d\n", slice_id, ctx->allreduce_flags[slice_id]);
+		//先等待slice完成
+		// sleep(1);
+		// fprintf(stderr,"ctx->allreduce_flags[%d]=%d\n", slice_id, ctx->allreduce_flags[slice_id]);
 		while (ctx->allreduce_flags[slice_id] != ctx->intra_node_procn)
 			;
 		int count_c1 = std::min(count - start, slice_sz);
@@ -351,11 +352,11 @@ void pjt_memory_bandwidth_efficient_allreduce_callback(int thid, int sig)
 			{
 				void *sendbuf = sendb + start * elem_sz;
 				void *recvbuf = recvb + start * elem_sz;
-				MPI_Allreduce(sendbuf, recvbuf, count_c1, allreduce_req.datatype, allreduce_req.mpi_op, ctx->Comm_inter_node);
+				PMPI_Allreduce(sendbuf, recvbuf, count_c1, allreduce_req.datatype, allreduce_req.mpi_op, ctx->Comm_inter_node);
 			}
 		}
 		else if (count_c1 > 0)
-			MPI_Allreduce(MPI_IN_PLACE, addrs, count_c1, allreduce_req.datatype, allreduce_req.mpi_op, ctx->Comm_inter_node);
+			PMPI_Allreduce(MPI_IN_PLACE, addrs, count_c1, allreduce_req.datatype, allreduce_req.mpi_op, ctx->Comm_inter_node);
 		while (!__sync_bool_compare_and_swap(&(ctx->allreduce_flags[slice_id]), ctx->intra_node_procn, ctx->intra_node_procn + 1))
 			;
 		slice_id += thread_ct;
@@ -453,7 +454,7 @@ private:
 		} while (flag1 != 1);                                \
 	}
 
-// #define ring_reduce_scatter_inplace(sendbuf, count, elem_sz, comm, rank, procn, counts, starts, fp, flag)
+//#define ring_reduce_scatter_inplace(sendbuf, count, elem_sz, comm, rank, procn, counts, starts, fp, flag)
 
 // Generator<int> ring_allgather(void *sendbuf, int count, int elem_sz, MPI_Comm comm, int rank, int procn, int *counts, int *starts, int flag)
 // inline void ring_allgather(void *sendbuf, int count, int elem_sz, MPI_Comm comm, int rank, int procn, int *counts, int *starts, int flag)
@@ -511,7 +512,7 @@ struct PJT_Iallreducer
 					co_yield 0;
 			intra_zni_reduce_scatter.destroy();
 
-			// 第二个hierarchy 是chip通信部分
+			//第二个hierarchy 是chip通信部分
 			if (ctx->intra_chip_procn > 1)
 			{
 				int *counts_intra_chip = new int[ctx->intra_chip_procn];
@@ -631,7 +632,7 @@ inline Generator<int> PJT_Iallreducer::ring_reduce_scatter_inplace(void *sendbuf
 	co_return 0;
 }
 
-// 等待wait_count个消息；
+//等待wait_count个消息；
 #define iph_iallreduce_wait(wait_count, pjt_iallreduce)           \
 	do                                                            \
 	{                                                             \
@@ -681,13 +682,13 @@ void innerf(void *datasend, void *datarecv, int count, int elem_sz, yhccl_op fp)
 	yhccl_contexts *ctx = yhccl_contexts::_ctx;
 	if (ctx->intra_node_procn == 1)
 	{
-		// 当每个节点内的进程数量为1的时候，采用大分片
+		//当每个节点内的进程数量为1的时候，采用大分片
 		ctx->_opt.intra_node_reduce_byte_unit = 1 << 26;
 	}
 
 	if (ctx->intra_node_rank == 0)
 	{
-		// 清理所有内存标志。
+		//清理所有内存标志。
 		int ct = 128 + count * elem_sz / ctx->_opt.intra_node_reduce_byte_unit;
 		memset(ctx->allreduce_flags, 0, ct * sizeof(unsigned long long));
 		// for (int i = 0; i < ct; i++)
@@ -702,25 +703,25 @@ void innerf(void *datasend, void *datarecv, int count, int elem_sz, yhccl_op fp)
 	int total_steps = count / step + (count % step == 0 ? 0 : 1);
 	if (0)
 	{
-		// 使用c++20无栈协程implement internode。编译器最低gcc11.2.0以上。
+		//使用c++20无栈协程implement internode。编译器最低gcc11.2.0以上。
 		PJT_Iallreducer pjt_iallreduce;
 		MPI_Request reqs[1 + count / step];
 		int step_id[1 + count / step];
 		MPI_Status status[1 + count / step];
 		int reqn = 0;
 		{
-			// 规约部分
-			// 每个进程负责其中的一部分;
+			//规约部分
+			//每个进程负责其中的一部分;
 			int slice_start = 0;
 			for (int ss = 0; ss < count; ss += ctx->intra_node_procn * step)
 			{
-				// 对每个大块
+				//对每个大块
 				void *dest = 0;
 				int countl = 0;
 				int slice_lid = -1;
 				for (int i = 0; i < ctx->intra_node_procn; i++)
 				{
-					// 对每一个进程
+					//对每一个进程
 					slice_lid = (i + ctx->intra_node_rank) % ctx->intra_node_procn;
 					int sliceStart = ss + step * slice_lid;
 					countl = std::min(count - sliceStart, step);
@@ -768,7 +769,7 @@ void innerf(void *datasend, void *datarecv, int count, int elem_sz, yhccl_op fp)
 		fflush(stdout);
 		MPI_Barrier(ctx->Comm_global);
 		{
-			// 等待和广播部分
+			//等待和广播部分
 			int wait_slice_count = 64;
 			int stepi = 0;
 			for (int s = 0; s < total_steps; s += wait_slice_count)
@@ -806,25 +807,25 @@ void innerf(void *datasend, void *datarecv, int count, int elem_sz, yhccl_op fp)
 
 	// if (0)
 	{
-		// 使用c++20无栈协程implement internode。编译器最低gcc11.2.0以上。
+		//使用c++20无栈协程implement internode。编译器最低gcc11.2.0以上。
 
 		MPI_Request reqs[1 + count / step];
 		int step_id[1 + count / step];
 		MPI_Status status[1 + count / step];
 		int reqn = 0;
 		{
-			// 规约部分
-			// 每个进程负责其中的一部分;
+			//规约部分
+			//每个进程负责其中的一部分;
 			int slice_start = 0;
 			for (int ss = 0; ss < count; ss += ctx->intra_node_procn * step)
 			{
-				// 对每个大块
+				//对每个大块
 				void *dest = 0;
 				int countl = 0;
 				int slice_lid = -1;
 				for (int i = 0; i < ctx->intra_node_procn; i++)
 				{
-					// 对每一个进程
+					//对每一个进程
 					slice_lid = (i + ctx->intra_node_rank) % ctx->intra_node_procn;
 					int sliceStart = ss + step * slice_lid;
 					countl = std::min(count - sliceStart, step);
@@ -864,7 +865,7 @@ void innerf(void *datasend, void *datarecv, int count, int elem_sz, yhccl_op fp)
 			MPI_Barrier(ctx->Comm_intra_node);
 		}
 		{
-			// 等待和广播部分
+			//等待和广播部分
 			int wait_slice_count = 24;
 			int stepi = 0;
 			for (int s = 0; s < total_steps; s += wait_slice_count)
@@ -921,26 +922,26 @@ void innerf(void *datasend, void *datarecv, int count, int elem_sz, yhccl_op fp)
 
 	if (0)
 	{
-		// 性能不行，mpi_iallreduce似乎要尽可能提交更多的分片才能产生有效性能
-		//  overlapp algorithm (r+ia)1, (r+ia)2, (w+b)1, (r+ia)3, (w+b)2,(r+ia)4, (w+b)*k, (r+ia)*(k+2)
-		//  need reduce_and_iallreduce(),wait_and_broadcast()
+		//性能不行，mpi_iallreduce似乎要尽可能提交更多的分片才能产生有效性能
+		// overlapp algorithm (r+ia)1, (r+ia)2, (w+b)1, (r+ia)3, (w+b)2,(r+ia)4, (w+b)*k, (r+ia)*(k+2)
+		// need reduce_and_iallreduce(),wait_and_broadcast()
 		MPI_Request *reqs = new MPI_Request[1];
 		MPI_Request *reqs_backup = new MPI_Request[1];
 		MPI_Status status[1];
 		int reqn = 0;
 		{
-			// 规约部分
-			// 每个进程负责其中的一部分;
+			//规约部分
+			//每个进程负责其中的一部分;
 			int sliceid_start = 0;
 			int slice_lid = -1;
 			volatile void *dest = 0;
 			int countl = 0;
 			for (int ss = 0; ss < count; ss += ctx->intra_node_procn * step)
 			{
-				// 对每个大块reduce
+				//对每个大块reduce
 				for (int i = 0; i < ctx->intra_node_procn; i++)
 				{
-					// 对每一个进程
+					//对每一个进程
 					slice_lid = (i + ctx->intra_node_rank) % ctx->intra_node_procn;
 					int sliceStart = ss + step * slice_lid;
 					countl = std::min(count - sliceStart, step);
@@ -1070,8 +1071,8 @@ void innerf(void *datasend, void *datarecv, int count, int elem_sz, yhccl_op fp)
 	if (0)
 	{
 		int leadern = std::min(ctx->_opt.qp_vp_count, ctx->intra_node_procn);
-		// 使用c++20无栈协程implement internode。编译器最低gcc11.2.0以上。
-		//  auto allreducer = f3(datasend, datarecv, count, elem_sz, fp);
+		//使用c++20无栈协程implement internode。编译器最低gcc11.2.0以上。
+		// auto allreducer = f3(datasend, datarecv, count, elem_sz, fp);
 
 		int slice_id = 0;
 		int step = std::min(count / ctx->intra_node_procn, ctx->_opt.intra_node_reduce_byte_unit / elem_sz);
@@ -1079,17 +1080,17 @@ void innerf(void *datasend, void *datarecv, int count, int elem_sz, yhccl_op fp)
 		MPI_Status status[1 + count / step];
 		int reqn = 0;
 		{
-			// 规约部分
-			// 每个进程负责其中的一部分;
+			//规约部分
+			//每个进程负责其中的一部分;
 			int slice_start = 0;
 			for (int ss = 0; ss < count; ss += ctx->intra_node_procn * step)
 			{
-				// 对每个大块
+				//对每个大块
 				void *dest = 0;
 				int countl = 0;
 				for (int i = 0; i < ctx->intra_node_procn; i++)
 				{
-					// 对每一个进程
+					//对每一个进程
 					int slice_lid = (i + ctx->intra_node_rank) % ctx->intra_node_procn;
 					int sliceStart = ss + step * slice_lid;
 					countl = std::min(count - sliceStart, step);
@@ -1219,13 +1220,13 @@ void innerf(void *datasend, void *datarecv, int count, int elem_sz, yhccl_op fp)
 #ifdef CPP20_COROUTINE
 void innerf1(void *datasend, void *datarecv, int count, int elem_sz, yhccl_op fp)
 {
-	// 节点间规约与节点内广播以及节点内规约重叠
-	// 重叠方式
+	//节点间规约与节点内广播以及节点内规约重叠
+	//重叠方式
 	yhccl_contexts *ctx = yhccl_contexts::_ctx;
 
 	if (ctx->intra_node_rank == 0)
 	{
-		// 清理所有内存标志。
+		//清理所有内存标志。
 		int ct = 128 + count * elem_sz / ctx->_opt.intra_node_reduce_byte_unit;
 		memset(ctx->allreduce_flags, 0, ct * sizeof(unsigned long long));
 	}
@@ -1237,23 +1238,23 @@ void innerf1(void *datasend, void *datarecv, int count, int elem_sz, yhccl_op fp
 	int total_steps = count / step + (count % step == 0 ? 0 : 1);
 	MPI_Status status[total_steps];
 	{
-		// 使用c++20无栈协程implement internode。编译器最低gcc11.2.0以上。
+		//使用c++20无栈协程implement internode。编译器最低gcc11.2.0以上。
 		PJT_Iallreducer pjt_iallreduce;
 		pjt_iallreduce.mpi_reqs.resize(total_steps);
 		int reqn = 0;
 		{
-			// 规约部分
-			// 每个进程负责其中的一部分;
+			//规约部分
+			//每个进程负责其中的一部分;
 			int slice_start = 0;
 			for (int ss = 0; ss < count; ss += ctx->intra_node_procn * step)
 			{
-				// 对每个大块
+				//对每个大块
 				void *dest = 0;
 				int countl = 0;
 				int slice_lid = -1;
 				for (int i = 0; i < ctx->intra_node_procn; i++)
 				{
-					// 对每一个进程
+					//对每一个进程
 					slice_lid = (i + ctx->intra_node_rank) % ctx->intra_node_procn;
 					int sliceStart = ss + step * slice_lid;
 					countl = std::min(count - sliceStart, step);
@@ -1295,7 +1296,7 @@ void innerf1(void *datasend, void *datarecv, int count, int elem_sz, yhccl_op fp
 
 		// MPI_Waitall(reqn, &(pjt_iallreduce.mpi_reqs[0]), status);
 		{
-			// 广播部分
+			//广播部分
 			int each_proc_wait_ct = 1;
 			for (int slice_start = 0; slice_start < total_steps; slice_start += ctx->intra_node_procn)
 			{
@@ -1326,16 +1327,16 @@ void innerf1(void *datasend, void *datarecv, int count, int elem_sz, yhccl_op fp
 			MPI_Test((req_addr), &flag, (status_addr));                \
 		} while (!flag);                                               \
 	}
-#define PT_YIELD_MPI_WAIT(flag_mpi_wait1, ptp, req_addr, status_addr)     \
-	{                                                                     \
-		do                                                                \
-		{                                                                 \
-			flag_mpi_wait1 = 1;                                           \
-			if (ctx->inter_node_procn > 1)                                \
+#define PT_YIELD_MPI_WAIT(flag_mpi_wait1, ptp, req_addr, status_addr) \
+	{                                                                 \
+		do                                                            \
+		{                                                             \
+			flag_mpi_wait1 = 1;                                       \
+			if (ctx->inter_node_procn > 1)                            \
 				MPI_Test((req_addr), &flag_mpi_wait1, MPI_STATUS_IGNORE); \
-			if (flag_mpi_wait1 == 0)                                      \
-				PT_YIELD(ptp);                                            \
-		} while (flag_mpi_wait1 != 1);                                    \
+			if (flag_mpi_wait1 == 0)                                  \
+				PT_YIELD(ptp);                                        \
+		} while (flag_mpi_wait1 != 1);                                \
 	}
 
 static MPI_Datatype pjt_mpitype;
@@ -1346,7 +1347,7 @@ struct pjt_allreducer_pt
 	void clear_pjt_allreducer_pt()
 	{
 		allreduce_inplace_finished = -1;
-		// pjt_allreducer_pt_static_bufsz = (1<<28);
+			// pjt_allreducer_pt_static_bufsz = (1<<28);
 		addr_shift = 0;
 	}
 	pjt_allreducer_pt()
@@ -1444,7 +1445,7 @@ struct pjt_allreducer_pt
 			if (_TR_logical_rank % _TR_push_r == 0)
 			{
 				// printf("global_rank = %d _TR_push_r=%d _TR_procn=%d\n", ctx->global_rank, _TR_push_r, _TR_procn);
-				// 参与者
+				//参与者
 				// _TR_push_r *= _TR_k;
 				if (_TR_logical_rank % (_TR_push_r * _TR_k) == 0)
 				{
@@ -1479,7 +1480,7 @@ struct pjt_allreducer_pt
 				}
 				else
 				{
-					// 发送给parent
+					//发送给parent
 					int parent = (_TR_logical_rank / (_TR_push_r * _TR_k)) * (_TR_push_r * _TR_k);
 					int t = TR_logical_to_inter(parent);
 					MPI_Isend(_TR_sendbuf, _TR_ct, pjt_mpitype, t, reqn, ctx->Comm_inter_node, &(_TR_push_reqs[0]));
@@ -1489,13 +1490,13 @@ struct pjt_allreducer_pt
 			_TR_push_r *= _TR_k;
 		}
 		// printf("global_rank = %d _TR_push_r=%d _TR_procn=%d\n", ctx->global_rank, _TR_push_r, _TR_procn);
-		// 广播
+		//广播
 		_TR_push_r /= _TR_k;
 		while (_TR_push_r >= 1)
 		{
 			if (_TR_logical_rank % _TR_push_r == 0)
 			{
-				// 参与者
+				//参与者
 				if (_TR_logical_rank % (_TR_push_r * _TR_k) == 0)
 				{
 					// parent
@@ -1651,7 +1652,7 @@ struct pjt_allreducer_pt
 			else if (yhccl_contexts::_ctx->_opt.inter_node_algorithm == 1)
 			{
 				// hierarchy ring-ring
-				// 第一步first level -reducescatter
+				//第一步first level -reducescatter
 				ring_reduce_scatter_inplace(sendbuf, count, 1, _rankX, _dimX);
 				while (ring_reduce_scatter_inplace_finished != 1)
 				{
@@ -1683,7 +1684,7 @@ struct pjt_allreducer_pt
 						PT_YIELD(&mypt);
 					}
 				}
-				// 第二步first level allgather
+				//第二步first level allgather
 				iphring_allgather(sendbuf, count, 1, _rankX, _dimX);
 				while (ring_allgather_finished != 1)
 				{
@@ -1694,7 +1695,7 @@ struct pjt_allreducer_pt
 			else if (yhccl_contexts::_ctx->_opt.inter_node_algorithm == 2)
 			{
 				// hierarchy ring-tree
-				// 第一步first level -reducescatter
+				//第一步first level -reducescatter
 				ring_reduce_scatter_inplace(sendbuf, count, 1, _rankX, _dimX);
 				while (ring_reduce_scatter_inplace_finished != 1)
 				{
@@ -1710,6 +1711,7 @@ struct pjt_allreducer_pt
 					int rank = ctx->intra_zni_rank;
 					level_2_sendbuf = sendbuf + elem_sz * (rank * step + (rank < remain ? rank : remain));
 					level_2_ct = step + (rank < remain ? 1 : 0);
+
 
 					tree_reduce_bcast(level_2_sendbuf, level_2_ct, _dimX, _rankY, _dimY);
 					while (tree_reduce_bcast_finished != 1)
@@ -1730,7 +1732,7 @@ struct pjt_allreducer_pt
 					// MPI_Ibcast(level_2_sendbuf, level_2_ct, MPI_FLOAT, 0, ctx->Comm_intra_chip, &req);
 					// PT_YIELD_MPI_WAIT(flag_mpi_wait, &mypt, &req, &ptstatus);
 				}
-				// 第二步first level allgather
+				//第二步first level allgather
 				iphring_allgather(sendbuf, count, 1, _rankX, _dimX);
 				while (ring_allgather_finished != 1)
 				{
@@ -1801,7 +1803,7 @@ struct pjt_allreducer_pt
 		return allreduce_inplace_finished == 1;
 	}
 	/* data */
-	// 管理这协程的共享内存区域
+	//管理这协程的共享内存区域
 	int addr_shift;
 	void *sendbuf;
 	int count;
@@ -1809,6 +1811,7 @@ struct pjt_allreducer_pt
 	yhccl_op fp;
 	static int reqn;
 	int flag_mpi_wait;
+	
 
 	struct pt mypt;
 	MPI_Request req;
@@ -1837,13 +1840,13 @@ int pjt_allreducer_pt::reqn = 0;
 		pt_start++;                                          \
 	}
 
-struct pjt_allreduce_pt_individual_buffer
+struct pjt_allreduce_pt_individual_buffer 
 {
 
 	void clear_pjt_allreducer_pt()
 	{
 		allreduce_inplace_finished = -1;
-		// pjt_allreducer_pt_static_bufsz = (1<<28);
+			// pjt_allreducer_pt_static_bufsz = (1<<28);
 		// addr_shift = 0;
 	}
 	pjt_allreduce_pt_individual_buffer()
@@ -1851,8 +1854,8 @@ struct pjt_allreduce_pt_individual_buffer
 		allreduce_inplace_finished = -1;
 		ctx = yhccl_contexts::_ctx;
 		// addr_shift = 0;
-
-		tmp_buffer_capacity = 8192;
+		
+	 	tmp_buffer_capacity = 4*1024*1024;
 		tmp_buffer = malloc(tmp_buffer_capacity);
 	}
 	~pjt_allreduce_pt_individual_buffer()
@@ -1920,8 +1923,7 @@ struct pjt_allreduce_pt_individual_buffer
 		RRS_step = count / procn;
 		RRS_remain = count % procn;
 		int needed_space = 2 * RRS_step * elem_sz;
-		if (needed_space > tmp_buffer_capacity)
-		{
+		if(needed_space > tmp_buffer_capacity){
 			free(tmp_buffer);
 			tmp_buffer = malloc(needed_space);
 		}
@@ -1954,7 +1956,7 @@ struct pjt_allreduce_pt_individual_buffer
 			if (_TR_logical_rank % _TR_push_r == 0)
 			{
 				// printf("global_rank = %d _TR_push_r=%d _TR_procn=%d\n", ctx->global_rank, _TR_push_r, _TR_procn);
-				// 参与者
+				//参与者
 				// _TR_push_r *= _TR_k;
 				if (_TR_logical_rank % (_TR_push_r * _TR_k) == 0)
 				{
@@ -1989,7 +1991,7 @@ struct pjt_allreduce_pt_individual_buffer
 				}
 				else
 				{
-					// 发送给parent
+					//发送给parent
 					int parent = (_TR_logical_rank / (_TR_push_r * _TR_k)) * (_TR_push_r * _TR_k);
 					int t = TR_logical_to_inter(parent);
 					MPI_Isend(_TR_sendbuf, _TR_ct, pjt_mpitype, t, reqn, ctx->Comm_inter_node, &(_TR_push_reqs[0]));
@@ -1999,13 +2001,13 @@ struct pjt_allreduce_pt_individual_buffer
 			_TR_push_r *= _TR_k;
 		}
 		// printf("global_rank = %d _TR_push_r=%d _TR_procn=%d\n", ctx->global_rank, _TR_push_r, _TR_procn);
-		// 广播
+		//广播
 		_TR_push_r /= _TR_k;
 		while (_TR_push_r >= 1)
 		{
 			if (_TR_logical_rank % _TR_push_r == 0)
 			{
-				// 参与者
+				//参与者
 				if (_TR_logical_rank % (_TR_push_r * _TR_k) == 0)
 				{
 					// parent
@@ -2045,16 +2047,20 @@ struct pjt_allreduce_pt_individual_buffer
 	int _TR_push_r;
 	int _TR_push_i;
 
-	void tree_reduce_bcast(void *sendbuf, int count, int dim, int rank, int procn)
+	void tree_reduce_bcast(void *sendbuf, int count, int dim, int rank, int procn, int isshifttree)
 	{
 		_TR_pt.lc = NULL;
 		_TR_k = ctx->_opt.allreduce_tree_K;
 		_TR_sendbuf = sendbuf;
 		_TR_push_reqs.resize(_TR_k + 1);
 		_TR_ct = count;
-
+		
 		// _TR_root = (procn / 2 + ctx->intra_node_rank) % procn;
-		_TR_root = ((procn / ctx->intra_node_procn) * ctx->intra_node_rank + reqn) % procn;
+		if(isshifttree ==1)
+			_TR_root = ((procn / ctx->intra_node_procn) * ctx->intra_node_rank + reqn) % procn;
+		else{
+			_TR_root = 0;
+		}
 		// _TR_root = ((procn / ctx->intra_node_procn) * ctx->intra_node_rank) % procn;
 		// _TR_root = (ctx->intra_node_rank) % procn;
 		_TR_dim = dim;
@@ -2062,10 +2068,9 @@ struct pjt_allreduce_pt_individual_buffer
 		_TR_logical_rank = (procn + rank - _TR_root) % procn;
 		_TR_procn = procn;
 		tree_reduce_bcast_finished = 0;
-
-		int needed_space = (_TR_k + 1) * count * elem_sz;
-		if (needed_space > tmp_buffer_capacity)
-		{
+		
+		int needed_space = (_TR_k+1) * count * elem_sz;
+		if(needed_space > tmp_buffer_capacity){
 			free(tmp_buffer);
 			tmp_buffer = malloc(needed_space);
 		}
@@ -2156,20 +2161,24 @@ struct pjt_allreduce_pt_individual_buffer
 	int RA_sendtarget;
 	int RA_recvsource;
 
-	char *push()
+	char * push()
 	{
+		// allreduce_inplace_finished = 1;
+		// return 0;
+
 		PT_BEGIN(&mypt);
 		if (ctx->inter_node_procn > 1)
 		{
 			if (yhccl_contexts::_ctx->_opt.inter_node_algorithm == 0)
 			{
+
 				MPI_Iallreduce(MPI_IN_PLACE, sendbuf, count, pjt_mpitype, pjt_mpiop, ctx->Comm_inter_node, &req);
 				PT_YIELD_MPI_WAIT(flag_mpi_wait, &mypt, &req, &ptstatus);
 			}
 			else if (yhccl_contexts::_ctx->_opt.inter_node_algorithm == 1)
 			{
 				// hierarchy ring-ring
-				// 第一步first level -reducescatter
+				//第一步first level -reducescatter
 				ring_reduce_scatter_inplace(sendbuf, count, 1, _rankX, _dimX);
 				while (ring_reduce_scatter_inplace_finished != 1)
 				{
@@ -2201,7 +2210,7 @@ struct pjt_allreduce_pt_individual_buffer
 						PT_YIELD(&mypt);
 					}
 				}
-				// 第二步first level allgather
+				//第二步first level allgather
 				iphring_allgather(sendbuf, count, 1, _rankX, _dimX);
 				while (ring_allgather_finished != 1)
 				{
@@ -2212,44 +2221,32 @@ struct pjt_allreduce_pt_individual_buffer
 			else if (yhccl_contexts::_ctx->_opt.inter_node_algorithm == 2)
 			{
 				// hierarchy ring-tree
-				// 第一步first level -reducescatter
+				//第一步first level -reducescatter
+				_dimX = ctx->_opt.pp_zni;
+				_rankX = ctx->inter_node_rank % _dimX;
+				_dimY = ctx->inter_node_procn / _dimX;
+				_rankY = ctx->inter_node_rank / _dimX;
 				ring_reduce_scatter_inplace(sendbuf, count, 1, _rankX, _dimX);
 				while (ring_reduce_scatter_inplace_finished != 1)
 				{
 					ring_reduce_scatter_inplace_push();
 					PT_YIELD(&mypt);
 				}
-				// puts("1450");
-				// if(0)
-				if (ctx->intra_chip_procn > 1)
+				if(ctx->inter_node_procn > _dimX)
 				{
-					// puts("1450");
-					int step = count / ctx->intra_zni_procn;
-					int remain = count % ctx->intra_zni_procn;
-					int rank = ctx->intra_zni_rank;
-					level_2_sendbuf = sendbuf + elem_sz * (rank * step + (rank < remain ? rank : remain));
-					level_2_ct = step + (rank < remain ? 1 : 0);
+					int step = count / _dimX;
+					int remain = count % _dimX;
+					level_2_sendbuf = sendbuf + elem_sz * (_rankX * step + (_rankX < remain ? _rankX : remain));
+					level_2_ct = step + (_rankX < remain ? 1 : 0);
 
-					tree_reduce_bcast(level_2_sendbuf, level_2_ct, _dimX, _rankY, _dimY);
+					tree_reduce_bcast(level_2_sendbuf, level_2_ct, _dimX, _rankY, _dimY,1);
 					while (tree_reduce_bcast_finished != 1)
 					{
 						tree_reduce_bcast_push();
 						PT_YIELD(&mypt);
 					}
-					// printf(" %d %d %d %d\n", ctx->global_rank, ctx->intra_chip_rank, ctx->intra_node_rank, ctx->intra_node_procn);
-					// MPI_Iallreduce(MPI_IN_PLACE, level_2_sendbuf, level_2_ct, MPI_FLOAT, MPI_SUM, ctx->Comm_intra_chip, &req);
-					// PT_YIELD_MPI_WAIT(flag_mpi_wait, &mypt, &req, &ptstatus);
-
-					// if (ctx->intra_chip_rank == 0)
-					// 	MPI_Ireduce(MPI_IN_PLACE, level_2_sendbuf, level_2_ct, MPI_FLOAT, MPI_SUM, 0, ctx->Comm_intra_chip, &req);
-					// else
-					// 	MPI_Ireduce(level_2_sendbuf, level_2_sendbuf, level_2_ct, MPI_FLOAT, MPI_SUM, 0, ctx->Comm_intra_chip, &req);
-					// PT_YIELD_MPI_WAIT(flag_mpi_wait, &mypt, &req, &ptstatus);
-
-					// MPI_Ibcast(level_2_sendbuf, level_2_ct, MPI_FLOAT, 0, ctx->Comm_intra_chip, &req);
-					// PT_YIELD_MPI_WAIT(flag_mpi_wait, &mypt, &req, &ptstatus);
 				}
-				// 第二步first level allgather
+				//第二步first level allgather
 				iphring_allgather(sendbuf, count, 1, _rankX, _dimX);
 				while (ring_allgather_finished != 1)
 				{
@@ -2262,14 +2259,26 @@ struct pjt_allreduce_pt_individual_buffer
 				//  tree
 				// MPI_Iallreduce(MPI_IN_PLACE, sendbuf, count, pjt_mpitype, pjt_mpiop, ctx->Comm_inter_node, &req);
 				// PT_YIELD_MPI_WAIT(flag_mpi_wait, &mypt, &req, &ptstatus);
-				if (ctx->inter_node_rank == 0)
-					MPI_Ireduce(MPI_IN_PLACE, sendbuf, count, pjt_mpitype, pjt_mpiop, 0, ctx->Comm_inter_node, &req);
-				else
-					MPI_Ireduce(sendbuf, sendbuf, count, pjt_mpitype, pjt_mpiop, 0, ctx->Comm_inter_node, &req);
-				PT_YIELD_MPI_WAIT(flag_mpi_wait, &mypt, &req, &ptstatus);
 
-				MPI_Ibcast(sendbuf, count, pjt_mpitype, 0, ctx->Comm_inter_node, &req);
-				PT_YIELD_MPI_WAIT(flag_mpi_wait, &mypt, &req, &ptstatus);
+
+				
+					tree_reduce_bcast(sendbuf, count, 1, ctx->inter_node_rank, ctx->inter_node_procn,0);
+					while (tree_reduce_bcast_finished != 1)
+					{
+						tree_reduce_bcast_push();
+						PT_YIELD(&mypt);
+					}
+
+
+
+				// if (ctx->inter_node_rank == 0)
+				// 	MPI_Ireduce(MPI_IN_PLACE, sendbuf, count, pjt_mpitype, pjt_mpiop, 0, ctx->Comm_inter_node, &req);
+				// else
+				// 	MPI_Ireduce(sendbuf, sendbuf, count, pjt_mpitype, pjt_mpiop, 0, ctx->Comm_inter_node, &req);
+				// PT_YIELD_MPI_WAIT(flag_mpi_wait, &mypt, &req, &ptstatus);
+
+				// MPI_Ibcast(sendbuf, count, pjt_mpitype, 0, ctx->Comm_inter_node, &req);
+				// PT_YIELD_MPI_WAIT(flag_mpi_wait, &mypt, &req, &ptstatus);
 			}
 			else if (yhccl_contexts::_ctx->_opt.inter_node_algorithm == 4)
 			{
@@ -2289,15 +2298,167 @@ struct pjt_allreduce_pt_individual_buffer
 			}
 			else if (yhccl_contexts::_ctx->_opt.inter_node_algorithm == 5)
 			{
+				//Blue connect p=4
+				_dimX = 1;
+				_dimY = 10;
+				while(ctx->inter_node_procn >= (_dimX * _dimY))
+				{
+					if ((ctx->inter_node_procn % (_dimX * _dimY)) == 0)
+					{
+						_rankX = (ctx->inter_node_rank % (_dimX * _dimY)) % _dimX;
+						_rankY = (ctx->inter_node_rank % (_dimX * _dimY)) / _dimX;
+						ring_reduce_scatter_inplace(sendbuf, count / _dimX, _dimX, _rankY, _dimY);
+						while (ring_reduce_scatter_inplace_finished != 1)
+						{
+							ring_reduce_scatter_inplace_push();
+							PT_YIELD(&mypt);
+						}
+						sendbuf+= _rankY * elem_sz * (count / (_dimX * _dimY));
+						_dimX *= _dimY;
+					}else{
+						if(ctx->inter_node_procn % _dimX != 0)
+						{
+							printf("error 2327");
+							exit(0);
+						}
+					}
+				}
+				if (_dimX < ctx->inter_node_procn)
+				{
+					// puts("2350");
+					_dimY = ctx->inter_node_procn / _dimX;
+					_rankX = (ctx->inter_node_rank % (_dimX * _dimY)) % _dimX;
+					_rankY = (ctx->inter_node_rank % (_dimX * _dimY)) / _dimX;
+					ring_reduce_scatter_inplace(sendbuf, count / _dimX, _dimX, _rankY, _dimY);
+					while (ring_reduce_scatter_inplace_finished != 1)
+					{
+						ring_reduce_scatter_inplace_push();
+						PT_YIELD(&mypt);
+					}
+					iphring_allgather(sendbuf, count / _dimX, _dimX, _rankY, _dimY);
+					while (ring_allgather_finished != 1)
+					{
+						ring_allgather_push();
+						PT_YIELD(&mypt);
+					}
+					// _dimX/=10;
+				}
+
+				while(_dimX > 1)
+				{
+					_dimY=10;
+					_dimX /= _dimY;
+					_rankX = (ctx->inter_node_rank % (_dimX * _dimY)) % _dimX;
+					_rankY = (ctx->inter_node_rank % (_dimX * _dimY)) / _dimX;
+					sendbuf -= _rankY * elem_sz * (count / (_dimX * _dimY));
+					iphring_allgather(sendbuf, count / _dimX, _dimX, _rankY, _dimY);
+					while (ring_allgather_finished != 1)
+					{
+						ring_allgather_push();
+						PT_YIELD(&mypt);
+					}
+				}
 				// MPI_Ireduce_scatter_block(MPI_IN_PLACE,sendbuf,count/ctx->intra_zni_procn,MPI_FLOAT,MPI_SUM,ctx->Comm_intra_zni, &req);
 				// PT_YIELD_MPI_WAIT(flag_mpi_wait, &mypt, &req, &ptstatus);
+			}else if (yhccl_contexts::_ctx->_opt.inter_node_algorithm == 6)
+			{
+				// if (0)
+				{
+					_dimX = 1;
+					_dimY = ctx->_opt.pp_zni;
+					level_sendbuf[0] = sendbuf;
+					level_ct[0] = count;
+					_rankY = (ctx->inter_node_rank % (_dimX * _dimY)) / _dimX;
+					// printf("%d %d %d %d\n", ctx->global_rank, _dimX, _rankY, _dimY);
+					if (1 != _dimY)
+					{
+						// _rankX = (ctx->inter_node_rank % (_dimX * _dimY)) % _dimX;
+						ring_reduce_scatter_inplace(level_sendbuf[0], level_ct[0], _dimX, _rankY, _dimY);
+						while (ring_reduce_scatter_inplace_finished != 1)
+						{
+							ring_reduce_scatter_inplace_push();
+							PT_YIELD(&mypt);
+						}
+						_dimX *= _dimY;
+					}
+
+					int step = level_ct[0] / _dimY;
+					int remain = level_ct[0] % _dimY;
+					level_sendbuf[1] = level_sendbuf[0] + elem_sz * (step * _rankY + (_rankY < remain ? _rankY : remain));
+					level_ct[1] = step + (_rankY < remain ? 1 : 0);
+					{
+						_dimY = ctx->_opt.pp_chip;
+						_rankY = (ctx->inter_node_rank % (_dimX * _dimY)) / _dimX;
+						// printf("%d %d %d %d\n", ctx->global_rank, _dimX, _rankY, _dimY);
+						if (1 != _dimY)
+						{
+							// _rankX = (ctx->inter_node_rank % (_dimX * _dimY)) % _dimX;
+
+							ring_reduce_scatter_inplace(level_sendbuf[1], level_ct[1], _dimX, _rankY, _dimY);
+							while (ring_reduce_scatter_inplace_finished != 1)
+							{
+								ring_reduce_scatter_inplace_push();
+								PT_YIELD(&mypt);
+							}
+							_dimX *= _dimY;
+						}
+					}
+
+					step = level_ct[1] / _dimY;
+					remain = level_ct[1] % _dimY;
+					level_sendbuf[2] = level_sendbuf[1] + elem_sz * (step * _rankY + (_rankY < remain ? _rankY : remain));
+					level_ct[2] = step + (_rankY < remain ? 1 : 0);
+					if (_dimX < ctx->inter_node_procn)
+					{
+						_dimY = ctx->inter_node_procn / _dimX;
+						_rankY = (ctx->inter_node_rank % (_dimX * _dimY)) / _dimX;
+						tree_reduce_bcast(level_sendbuf[2], level_ct[2], _dimX, _rankY, _dimY, 1);
+						while (tree_reduce_bcast_finished != 1)
+						{
+							tree_reduce_bcast_push();
+							PT_YIELD(&mypt);
+						}
+					}
+
+					{
+						_dimY = ctx->_opt.pp_chip;
+						_dimX /= _dimY;
+						if (1 != _dimY)
+						{
+							_rankY = (ctx->inter_node_rank % (_dimX * _dimY)) / _dimX;
+							iphring_allgather(level_sendbuf[1], level_ct[1], _dimX, _rankY, _dimY);
+							while (ring_allgather_finished != 1)
+							{
+								ring_allgather_push();
+								PT_YIELD(&mypt);
+							}
+						}
+					}
+
+					{
+						_dimY = ctx->_opt.pp_zni;
+						_dimX /= _dimY;
+						if (1 != _dimY)
+						{
+							_rankY = (ctx->inter_node_rank % (_dimX * _dimY)) / _dimX;
+							iphring_allgather(level_sendbuf[0], level_ct[0], _dimX, _rankY, _dimY);
+							while (ring_allgather_finished != 1)
+							{
+								ring_allgather_push();
+								PT_YIELD(&mypt);
+							}
+						}
+					}
+				}
 			}
-			allreduce_inplace_finished = 1;
-			PT_END(&mypt);
 		}
+		allreduce_inplace_finished = 1;
+		PT_END(&mypt);
 	}
 	void *level_2_sendbuf;
 	int level_2_ct;
+	void *level_sendbuf[3];
+	int level_ct[3];
 	void allreduce_inplace(void *sendb, int ct, int sz, yhccl_op op, int n)
 	{
 		allreduce_inplace_finished = 0;
@@ -2325,16 +2486,16 @@ struct pjt_allreduce_pt_individual_buffer
 		return allreduce_inplace_finished == 1;
 	}
 	/* data */
-	// 管理这协程的共享内存区域
-	//  int addr_shift;
+	//管理这协程的共享内存区域
+	// int addr_shift;
 	void *sendbuf;
 	int count;
 	int elem_sz;
 	yhccl_op fp;
 	int reqn;
 	int flag_mpi_wait;
-
-	void *tmp_buffer;
+	
+	void * tmp_buffer;
 	int tmp_buffer_capacity;
 
 	struct pt mypt;
@@ -2343,6 +2504,7 @@ struct pjt_allreduce_pt_individual_buffer
 	yhccl_contexts *ctx;
 	int allreduce_inplace_finished;
 };
+
 
 struct pjt_inter_node_allreduce1 : public pjt_allreducer_pt
 // struct pjt_inter_node_allreduce1 : public pjt_allreduce_pt_individual_buffer
@@ -2366,7 +2528,7 @@ public:
 		else
 		{
 
-			// 栅栏第一步，收集
+			//栅栏第一步，收集
 			if (ctx->intra_node_rank == 0)
 			{
 				for (barrieri = 1; barrieri < ctx->intra_node_procn; barrieri++)
@@ -2513,7 +2675,7 @@ void innerf4(const void *datasend, void *datarecv, int count, int elem_sz, MPI_D
 	int total_steps = count / step + (count % step == 0 ? 0 : 1);
 	if (ctx->intra_node_rank == 0)
 	{
-		// 清理所有内存标志。
+		//清理所有内存标志。
 		int ct = total_steps + 1;
 		memset(ctx->allreduce_flags, -1, ct * sizeof(unsigned long long));
 	}
@@ -2532,7 +2694,7 @@ void innerf4(const void *datasend, void *datarecv, int count, int elem_sz, MPI_D
 		counts[ctx->intra_node_procn - 1] += remain;
 		void *recvbuf = ctx->larger_msg_allreduce_result_start_0 + s * elem_sz * ctx->intra_node_rank;
 		// MPI_Reduce_scatter(datasend, recvbuf, counts, mpitype, mpi_op, ctx->Comm_intra_node);
-		MPI_Reduce(datasend, ctx->larger_msg_allreduce_result_start_0, count, mpitype, mpi_op, 0, ctx->Comm_intra_node);
+		PMPI_Reduce(datasend, ctx->larger_msg_allreduce_result_start_0, count, mpitype, mpi_op, 0, ctx->Comm_intra_node);
 	}
 	// MPI_Barrier(ctx->Comm_intra_node);
 	if (ctx->intra_node_rank == 0)
@@ -2558,7 +2720,7 @@ void innerf5(const void *datasend, void *datarecv, int count, int elem_sz, MPI_D
 	int total_steps = count / step + (count % step == 0 ? 0 : 1);
 	if (ctx->intra_node_rank == 0)
 	{
-		// 清理所有内存标志。
+		//清理所有内存标志。
 		int ct = total_steps + 1;
 		memset(ctx->allreduce_flags, -1, ct * sizeof(unsigned long long));
 	}
@@ -2576,8 +2738,8 @@ void innerf5(const void *datasend, void *datarecv, int count, int elem_sz, MPI_D
 			counts[i] = s;
 		counts[ctx->intra_node_procn - 1] += remain;
 		void *recvbuf = ctx->larger_msg_allreduce_result_start_0 + s * elem_sz * ctx->intra_node_rank;
-		MPI_Reduce_scatter(datasend, recvbuf, counts, mpitype, mpi_op, ctx->Comm_intra_node);
-		// MPI_Reduce(datasend, ctx->larger_msg_allreduce_result_start_0, count, mpitype, mpi_op, 0, ctx->Comm_intra_node);
+		PMPI_Reduce_scatter(datasend, recvbuf, counts, mpitype, mpi_op, ctx->Comm_intra_node);
+		// PMPI_Reduce(datasend, ctx->larger_msg_allreduce_result_start_0, count, mpitype, mpi_op, 0, ctx->Comm_intra_node);
 	}
 	MPI_Barrier(ctx->Comm_intra_node);
 	if (ctx->intra_node_rank == 0)
@@ -2618,7 +2780,7 @@ struct AG_Coroutine
 		else
 		{
 
-			// 栅栏第一步，收集
+			//栅栏第一步，收集
 			if (ctx->intra_node_rank == 0)
 			{
 				for (barrieri = 1; barrieri < ctx->intra_node_procn; barrieri++)
@@ -2670,13 +2832,13 @@ struct AG_Coroutine
 		PT_BEGIN(&AG_pt);
 		{
 			{
-				// 广播部分,单独做成一个协程
+				//广播部分,单独做成一个协程
 				for (s = 0; s < total_steps; s += ctx->intra_node_procn)
 				{
 					slice_id = (s + ctx->intra_node_rank);
 					if (slice_id < total_steps)
 					{
-						// 等待slice完成
+						//等待slice完成
 						if (ctx->inter_node_procn > 1)
 						{
 
@@ -2725,16 +2887,14 @@ struct AG_Coroutine
 						// 						{
 
 #ifdef PJT_AVX_ASSEMBLY_MEMCPY
-						if (ctx->_opt.using_non_temporal == 1)
-						{
+						if (ctx->_opt.using_non_temporal == 1){
 
 							pjt_target_cachebypass_memmove(end_addr, start_addr, ct * elem_sz);
 						}
-						else
-						{
+						else{
 							pjt_memmove(end_addr, start_addr, ct * elem_sz);
 						}
-						// pjt_target_cachebypass_memmove(end_addr, start_addr, ct * elem_sz);
+							// pjt_target_cachebypass_memmove(end_addr, start_addr, ct * elem_sz);
 #else
 						memmove(end_addr, start_addr, ct * elem_sz);
 #endif
@@ -2825,6 +2985,7 @@ struct NUMA_RS_Coroutine
 			{
 				// MPI_Barrier(ctx->Comm_intra_node);
 				// 每次处理ppn个块
+				// if(0)
 				{
 					if (ctx->_opt.intra_node_reduce_type == CacheEfficient)
 					{
@@ -2837,46 +2998,46 @@ struct NUMA_RS_Coroutine
 						// fflush(stdout);
 
 						// for (i = 0; i < inter_numa_procn; i++)
-						// 						if(0)
-						// 						{
-						// 							// 遍历inter_numa_procn
-						// 							my_start = ss + ctx->intra_node_rank * step;
-						// 							dest = ctx->larger_msg_allreduce_result_start_0 + my_start * elem_sz;
-						// 							// printf("original %d %f\n", ctx->intra_node_rank, *(float *)dest);
-						// 							countl = std::min(count - my_start, step);
-						// 							for (j = 1; j < ctx->intra_node_procn; j++)
-						// 							{
-						// 								// 遍历intra_numa_procn
-						// 								source = ctx->neigbbor_buffers[j] + my_start * elem_sz;
+// 						if(0)
+// 						{
+// 							// 遍历inter_numa_procn
+// 							my_start = ss + ctx->intra_node_rank * step;
+// 							dest = ctx->larger_msg_allreduce_result_start_0 + my_start * elem_sz;
+// 							// printf("original %d %f\n", ctx->intra_node_rank, *(float *)dest);
+// 							countl = std::min(count - my_start, step);
+// 							for (j = 1; j < ctx->intra_node_procn; j++)
+// 							{
+// 								// 遍历intra_numa_procn
+// 								source = ctx->neigbbor_buffers[j] + my_start * elem_sz;
+								
+// 								// source = ctx->neigbbor_buffers[ctx->intra_node_rank] + my_start * elem_sz;
+// 								if (countl > 0)
+// 								{
+// 									if (0 != fp)
+// 									{
+// 										fp(source, dest, &countl, 0);
+// 									}
+// 									else
+// 									{
+// #ifdef PJT_MPI
+// 										ompi_op_reduce(mpi_op, source, dest, countl, mpitype);
+// #endif
+// 									}
+// 								}
+// 							}
+// 						}
 
-						// 								// source = ctx->neigbbor_buffers[ctx->intra_node_rank] + my_start * elem_sz;
-						// 								if (countl > 0)
-						// 								{
-						// 									if (0 != fp)
-						// 									{
-						// 										fp(source, dest, &countl, 0);
-						// 									}
-						// 									else
-						// 									{
-						// #ifdef PJT_MPI
-						// 										ompi_op_reduce(mpi_op, source, dest, countl, mpitype);
-						// #endif
-						// 									}
-						// 								}
-						// 							}
-						// 						}
-
-						// 把DPML该为两步规约
-						// 第一步socket内，第二步socket-间
+						//两步并行规约
+						//第一步socket内，第二步socket-间
 						{
-							for (int i = 0; i < inter_numa_procn; i++)
+							for(int i = 0;i<inter_numa_procn;i++)
 							{
-								my_start = ss + (i * intra_numa_procn + intra_numa_rank) * step;
+								 my_start = ss + (i * intra_numa_procn + intra_numa_rank )* step;
 								if (ctx->intra_node_rank < intra_numa_procn)
 									dest = ctx->larger_msg_allreduce_result_start_0 + my_start * elem_sz;
 								else
 									dest = ctx->neigbbor_buffers[inter_numa_rank * intra_numa_procn] + my_start * elem_sz;
-								for (int j = 1; j < intra_numa_procn; j++)
+								for(int j = 1;j<intra_numa_procn;j++)
 								{
 									source = ctx->neigbbor_buffers[j + inter_numa_rank * intra_numa_procn] + my_start * elem_sz;
 									countl = std::min(count - my_start, step);
@@ -2884,7 +3045,7 @@ struct NUMA_RS_Coroutine
 									{
 										if (0 != fp)
 										{
-											fp(source, dest, &countl, 0);
+											// fp(source, dest, &countl, 0);
 										}
 										else
 										{
@@ -2898,7 +3059,7 @@ struct NUMA_RS_Coroutine
 							MPI_Barrier(ctx->Comm_intra_node);
 							my_start = ss + ctx->intra_node_rank * step;
 							dest = ctx->larger_msg_allreduce_result_start_0 + my_start * elem_sz;
-							for (int i = 1; i < inter_numa_procn; i++)
+							for(int i = 1;i<inter_numa_procn;i++)
 							{
 								source = ctx->neigbbor_buffers[i * intra_numa_procn] + my_start * elem_sz;
 								countl = std::min(count - my_start, step);
@@ -2906,7 +3067,7 @@ struct NUMA_RS_Coroutine
 								{
 									if (0 != fp)
 									{
-										fp(source, dest, &countl, 0);
+										// fp(source, dest, &countl, 0);
 									}
 									else
 									{
@@ -2922,109 +3083,67 @@ struct NUMA_RS_Coroutine
 					{
 						// if(0)
 						{
-							// continue;
-							// MPI_Barrier(ctx->Comm_intra_node);
-							// if (ctx->intra_node_rank == 0)
-							// puts(" Memory efficient ");
-							// fflush(stdout);
-							// MPI_Barrier(ctx->Comm_intra_node);
-							// exit(0);
-							// 见2022-7月笔记40号
-							// printf("core_per_numa=%d inter_numa_procn=%d intra_numa_procn=%d\n",
-							// ctx->_opt.core_per_numa, inter_numa_procn, intra_numa_procn);
+						// continue;
+						// MPI_Barrier(ctx->Comm_intra_node);
+						// if (ctx->intra_node_rank == 0)
+						// puts(" Memory efficient ");
+						// fflush(stdout);
+						// MPI_Barrier(ctx->Comm_intra_node);
+						// exit(0);
+						// 见2022-7月笔记40号
+						// printf("core_per_numa=%d inter_numa_procn=%d intra_numa_procn=%d\n",
+						// ctx->_opt.core_per_numa, inter_numa_procn, intra_numa_procn);
 
+						{
+							for (j = 0; j < intra_numa_procn; j++)
 							{
-								for (j = 0; j < intra_numa_procn; j++)
-								{
-									slice_lid = (j + intra_numa_rank) % intra_numa_procn; // 开始slicelid
-									// i * intra_numa_procn + (j + intra_numa_rank) % intra_numa_procn;
-									flag_index = inter_numa_rank * intra_numa_procn + slice_lid;
-									if (ctx->inter_node_procn == 1)
-										my_start = step * inter_numa_procn * slice_lid;
-									else
-										my_start = ss + step * inter_numa_procn * slice_lid;
-									my_start_source = ss + step * inter_numa_procn * slice_lid;
+								slice_lid = (j + intra_numa_rank) % intra_numa_procn; //开始slicelid
+								// i * intra_numa_procn + (j + intra_numa_rank) % intra_numa_procn;
+								flag_index = inter_numa_rank * intra_numa_procn + slice_lid;
+								if (ctx->inter_node_procn == 1)
+									my_start = step*inter_numa_procn * slice_lid;
+								else
+									my_start = ss + step*inter_numa_procn * slice_lid;
+								my_start_source = ss + step*inter_numa_procn * slice_lid;
 
-									countl = std::min(count - my_start_source, step * inter_numa_procn);
-									if (countl > 0)
-									{
-										source = datasend + my_start_source * elem_sz;
-										if (ctx->intra_node_rank < intra_numa_procn)
+								countl = std::min(count - my_start_source, step*inter_numa_procn);
+								if (countl > 0)
+								{
+									source = datasend + my_start_source * elem_sz;
+									if (ctx->intra_node_rank < intra_numa_procn)
 											dest = dest_buf + (my_start_source)*elem_sz;
-										else
-											dest = ctx->neigbbor_buffers[inter_numa_rank * intra_numa_procn] + (my_start + (loopi & 0x1) * ctx->intra_node_procn * step) * elem_sz;
+									else
+											dest = ctx->neigbbor_buffers[inter_numa_rank * intra_numa_procn] + (my_start + (loopi &0x1) * ctx->intra_node_procn * step) * elem_sz;
 
-										tmp_val = (intra_numa_procn * group_count + j);
-										while (control_shm_flags_inter_numa[PJT_allreduce_flag_to_index(flag_index)] != tmp_val)
-										{
-											if (ctx->inter_node_procn != 1)
-												PT_YIELD(&RS_pt);
-										}
-										if (j == 0)
-										{
-#ifdef PJT_AVX_ASSEMBLY_MEMCPY
-											// pjt_memmove(dest, source, countl * elem_sz);
-											if (ctx->_opt.using_non_temporal <= 1)
-											{
-												pjt_memmove(dest, source, countl * elem_sz);
-											}
-											else if (ctx->_opt.using_non_temporal == 2)
-											{
-												memory_fence();
-												pjt_target_cachebypass_memmove(dest, source, countl * elem_sz);
-												memory_fence();
-											}
-											else
-											{
-												memmove(dest, source, countl * elem_sz);
-											}
-#else
-											memmove(dest, source, countl * elem_sz);
-#endif
-										}
-										else
-										{
-											if (0 != fp)
-											{
-												fp(source, dest, &countl, 0);
-											}
-											else
-											{
-#ifdef PJT_MPI
-												ompi_op_reduce(mpi_op, source, dest, countl, mpitype);
-#endif
-											}
-										}
-										control_shm_flags_inter_numa[PJT_allreduce_flag_to_index(flag_index)] += 1;
-									}
-								}
-							}
-							// MPI_Barrier(ctx->Comm_intra_node);
-
-							// 						// 接下来在NUMA间进行规约
-							if (ctx->inter_node_procn == 1)
-								my_start = ctx->intra_node_rank * step;
-							else
-								my_start = ss + ctx->intra_node_rank * step;
-							countl = std::min(count - (ss + ctx->intra_node_rank * step), step);
-							int my_start1 = (ss + ctx->intra_node_rank * step);
-							if (countl > 0)
-							{
-								for (j = 0; j < inter_numa_procn; j++)
-								{
-									source = ctx->neigbbor_buffers[j * intra_numa_procn] + (my_start + (loopi & 0x1) * ctx->intra_node_procn * step) * elem_sz;
-									dest = dest_buf + (my_start1)*elem_sz;
-									slice_lid = ctx->intra_node_rank / inter_numa_procn;
-									flag_index = (j * intra_numa_procn + slice_lid);
-									tmp_val = intra_numa_procn * (group_count + 1);
-									while (control_shm_flags_inter_numa[PJT_allreduce_flag_to_index(flag_index)] < tmp_val)
+									tmp_val = (intra_numa_procn * group_count + j);
+									while (control_shm_flags_inter_numa[PJT_allreduce_flag_to_index(flag_index)] != tmp_val)
 									{
-										if ((ctx->inter_node_procn != 1) && (ctx->_opt.intra_node_reduce_type == MemoryEfficient))
+										if (ctx->inter_node_procn != 1)
 											PT_YIELD(&RS_pt);
 									}
-									if (j != 0)
+									if (j == 0)
 									{
-										if (fp != 0)
+#ifdef PJT_AVX_ASSEMBLY_MEMCPY
+											// pjt_memmove(dest, source, countl * elem_sz);
+										if (ctx->_opt.using_non_temporal <= 1)
+										{
+											pjt_memmove(dest, source, countl * elem_sz);
+										}
+										else if (ctx->_opt.using_non_temporal == 2)
+										{
+											memory_fence();
+											pjt_target_cachebypass_memmove(dest, source, countl * elem_sz);
+											memory_fence();
+										}else{
+											memmove(dest, source, countl * elem_sz);
+										}
+#else
+										memmove(dest, source, countl * elem_sz);
+#endif
+									}
+									else
+									{
+										if (0 != fp)
 										{
 											fp(source, dest, &countl, 0);
 										}
@@ -3035,10 +3154,51 @@ struct NUMA_RS_Coroutine
 #endif
 										}
 									}
+									control_shm_flags_inter_numa[PJT_allreduce_flag_to_index(flag_index)] += 1;
 								}
 							}
+						}
+									// MPI_Barrier(ctx->Comm_intra_node);
 
-							// MPI_Barrier(ctx->Comm_intra_node);
+// 						// 接下来在NUMA间进行规约
+						 if (ctx->inter_node_procn == 1)
+						 	my_start = ctx->intra_node_rank * step;
+						 else
+							my_start = ss + ctx->intra_node_rank * step;
+						countl = std::min(count - (ss + ctx->intra_node_rank * step), step);
+						static int my_start1= (ss + ctx->intra_node_rank * step);
+						if (countl > 0)
+						{
+							for (j = 0; j < inter_numa_procn; j++)
+							{
+								source = ctx->neigbbor_buffers[j * intra_numa_procn] + (my_start + (loopi &0x1)*ctx->intra_node_procn *step) * elem_sz;
+								dest =  dest_buf+ (my_start1) * elem_sz;
+								slice_lid = ctx->intra_node_rank / inter_numa_procn;
+								flag_index = (j * intra_numa_procn + slice_lid);
+								tmp_val = intra_numa_procn * (group_count + 1);
+								while (control_shm_flags_inter_numa[PJT_allreduce_flag_to_index(flag_index)] < tmp_val)
+								{
+									if ((ctx->inter_node_procn != 1) && (ctx->_opt.intra_node_reduce_type == MemoryEfficient))
+										PT_YIELD(&RS_pt);
+								}
+								if (j != 0)
+								{
+									if (fp != 0)
+									{
+											fp(source, dest, &countl, 0);
+									}
+									else
+									{
+#ifdef PJT_MPI
+										ompi_op_reduce(mpi_op, source, dest, countl, mpitype);
+#endif
+									}
+								}
+							}
+						}
+
+
+						// MPI_Barrier(ctx->Comm_intra_node);
 						}
 					}
 					else
@@ -3083,18 +3243,18 @@ struct NUMA_RS_Coroutine
 		RS_pt.lc = NULL;
 		RS_finished = 0;
 		ctx = yhccl_contexts::_ctx;
-		if (ctx->intra_node_procn == 1)
+		if(ctx->intra_node_procn == 1)
 		{
 			RS_finished = 1;
-			return;
+			return ;
 		}
-		// MPI_Barrier(MPI_COMM_WORLD);
-		// if(ctx->intra_node_rank == 0)
-		// printf("================ctx->_opt.core_per_numa=%d==================================\n",ctx->_opt.core_per_numa );
-		// MPI_Barrier(MPI_COMM_WORLD);
+	// MPI_Barrier(MPI_COMM_WORLD);
+	// if(ctx->intra_node_rank == 0)
+	// printf("================ctx->_opt.core_per_numa=%d==================================\n",ctx->_opt.core_per_numa );
+	// MPI_Barrier(MPI_COMM_WORLD);
 		if (ctx->intra_node_procn % ctx->_opt.core_per_numa != 0)
 		{
-			// 对于无法整除NUMA的情况
+			//对于无法整除NUMA的情况
 			ctx->_opt.core_per_numa = ctx->intra_node_procn;
 		}
 		intra_numa_rank = ctx->intra_node_rank % (ctx->_opt.core_per_numa);
@@ -3122,30 +3282,31 @@ struct NUMA_RS_Coroutine
 		dest_buf = ctx->larger_msg_allreduce_result_start_0;
 		if (ctx->_opt.intra_node_reduce_type == CacheEfficient)
 		{
-			// #ifdef PJT_AVX_ASSEMBLY_MEMCPY
+// #ifdef PJT_AVX_ASSEMBLY_MEMCPY
 			// if (intra_numa_rank != 0)
-			if (ctx->intra_node_rank == 0)
-			{
-				pjt_source_cachebypass_memmove(dest_buf, datasend, count * elem_sz);
-			}
-			else
-			{
-				pjt_source_cachebypass_memmove(ctx->larger_msg_allreduce_my_sendbuf, datasend, count * elem_sz);
-			}
-			// #else
-			// #endif
+				if (ctx->intra_node_rank == 0)
+				{
+					pjt_source_cachebypass_memmove(dest_buf, datasend, count * elem_sz);
+				}
+				else
+				{
+					pjt_source_cachebypass_memmove(ctx->larger_msg_allreduce_my_sendbuf, datasend, count * elem_sz);
+				}
+				// memmove(dest_buf, datasend, count * elem_sz);
+// #else
+// #endif
 		}
 		{
 			MPI_Barrier(ctx->Comm_intra_node);
 		}
 		// puts("3211");
 	}
-	volatile void *dest_buf;
-	// 算法参数
+	volatile void * dest_buf;
+	//算法参数
 	int step;
 	int total_steps;
 
-	// 进程上下文
+	//进程上下文
 	yhccl_contexts *ctx;
 	int intra_numa_rank;
 	int inter_numa_rank;
@@ -3161,7 +3322,7 @@ struct NUMA_RS_Coroutine
 	yhccl_op fp;
 
 	volatile unsigned long long *control_shm_flags_inter_numa;
-	// 协程相关
+	//协程相关
 	int RS_finished;
 	struct pt RS_pt;
 };
@@ -3170,6 +3331,7 @@ struct NUMA_AG_Coroutine
 {
 	MPI_Request barrier_req;
 	MPI_Status barrier_status;
+		int flag_mpi_wait;
 	yhccl_contexts *ctx;
 	NUMA_AG_Coroutine()
 	{
@@ -3186,7 +3348,7 @@ struct NUMA_AG_Coroutine
 		}
 		else
 		{
-			// 栅栏第一步，收集
+			//栅栏第一步，收集
 			if (ctx->intra_node_rank == 0)
 			{
 				for (barrieri = 1; barrieri < ctx->intra_node_procn; barrieri++)
@@ -3233,14 +3395,15 @@ struct NUMA_AG_Coroutine
 
 	int s;
 	int slice_id;
-	char push()
+	char *push()
 	{
 		PT_BEGIN(&AG_pt);
 		static int loopi = 0;
 		loopi = 0;
+		// if(ctx->intra_node_rank <=)
 		{
 			{
-				// 广播部分,单独做成一个协程
+				//广播部分,单独做成一个协程
 				for (s = 0; s < total_steps; s += ctx->intra_node_procn)
 				{
 					slice_id = (s + ctx->intra_node_rank);
@@ -3251,29 +3414,30 @@ struct NUMA_AG_Coroutine
 						{
 							while (ctx->allreduce_flags[slice_id] != ctx->intra_node_procn + 1)
 							{
-								// PT_YIELD(&AG_pt);
+								PT_YIELD(&AG_pt);
 							}
 						}
 						// printf("check %d %d total_steps=%d\n", slice_id, ctx->allreduce_flags[slice_id], total_steps);
 					}
-
 					if (ctx->inter_node_procn > 1)
 					{
+						// MPI_Ibarrier(ctx->Comm_intra_node,&barrier_req);
+						// PT_YIELD_MPI_WAIT(flag_mpi_wait, &AG_pt, &barrier_req, 0);
 						yhccl_barrier_intra_node();
 						while (barrier_finished != 1)
 						{
 							push_barrier();
-							// PT_YIELD(&AG_pt);
+							PT_YIELD(&AG_pt);
 						}
+					}else{
+							MPI_Barrier(ctx->Comm_intra_node);
 					}
-					else
-					{
-						MPI_Barrier(ctx->Comm_intra_node);
-					}
-					// MPI_Barrier(ctx->Comm_intra_node);
+					// memory_fence();
+							// MPI_Barrier(ctx->Comm_intra_node);
 
 					// if (ctx->intra_node_rank == 0)
 					// 	puts("2803");
+					// if(0)
 					if (ctx->_opt.pjt_inner_cpy == 1)
 					{
 						// puts("pjt_inner_cpy=1");//(s % ctx->inter_node_procn) * step * elem_sz
@@ -3281,7 +3445,7 @@ struct NUMA_AG_Coroutine
 						// if (ctx->inter_node_procn == 1)
 						// 	start_addr = ctx->larger_msg_allreduce_result_start_0 ;
 						// else
-						start_addr = ctx->larger_msg_allreduce_result_start_0 + s * step * elem_sz;
+							start_addr = ctx->larger_msg_allreduce_result_start_0 + s * step * elem_sz;
 						void *end_addr = datarecv + s * step * elem_sz;
 						int ct = std::min(count - s * step, step * ctx->intra_node_procn);
 						int slice_sz = step * elem_sz;
@@ -3291,22 +3455,21 @@ struct NUMA_AG_Coroutine
 #ifdef PJT_AVX_ASSEMBLY_MEMCPY
 							if (ctx->_opt.using_non_temporal == 0)
 							{
-								// puts("3245");
-								// memmove(end_addr + ss, start_addr + ss, lsz);
-								pjt_memmove(end_addr + ss, start_addr + ss, lsz);
+									// puts("3245");
+									// memmove(end_addr + ss, start_addr + ss, lsz);
+									pjt_memmove(end_addr + ss, start_addr + ss, lsz);
 							}
 							else if (ctx->_opt.using_non_temporal == 1)
 							{
-								// puts("3240");
-								pjt_target_cachebypass_memmove(end_addr + ss, start_addr + ss, lsz);
+									// puts("3240");
+									pjt_target_cachebypass_memmove(end_addr + ss, start_addr + ss, lsz);
 							}
 							else if (ctx->_opt.using_non_temporal == 2)
 							{
-								pjt_target_cachebypass_memmove(end_addr + ss, start_addr + ss, lsz);
-							}
-							else
+									pjt_target_cachebypass_memmove(end_addr + ss, start_addr + ss, lsz);
+							}else
 							{
-								memmove(end_addr + ss, start_addr + ss, lsz);
+									memmove(end_addr + ss, start_addr + ss, lsz);
 							}
 #else
 							memmove(end_addr + ss, start_addr + ss, lsz);
@@ -3327,7 +3490,7 @@ struct NUMA_AG_Coroutine
 		PT_END(&AG_pt);
 	}
 	int AG_finished = 0;
-	void intra_node_all_gather(void *_datarecv, int _count, int _elem_sz, int _step, int _total_steps)
+	void intra_node_all_gather(void *_datarecv, int _count, int _elem_sz, int _step, int _total_steps,int leadern)
 	{
 		AG_pt.lc = NULL;
 		datarecv = _datarecv;
@@ -3336,12 +3499,14 @@ struct NUMA_AG_Coroutine
 		step = _step;
 		total_steps = _total_steps;
 		AG_finished = 0;
+		leader_n = leadern;
 
 		core_per_numa = ctx->_opt.core_per_numa;
 		numa_n = ctx->_opt.numa_n;
 		intra_numa_rank = ctx->intra_node_rank % core_per_numa;
 		inter_numa_rank = ctx->intra_node_rank / core_per_numa;
 	}
+	int leader_n;
 	struct pt AG_pt;
 	int numa_n;
 	int core_per_numa;
@@ -3355,19 +3520,19 @@ struct NUMA_AG_Coroutine
 };
 struct pjt_inter_node_allreduce_MCC
 {
-
-	pjt_inter_node_allreduce_MCC()
-	{
+	int MLHA_submitted_max=8;
+	pjt_inter_node_allreduce_MCC(){
 		ctx = yhccl_contexts::_ctx;
-		all_reduce_pt_vec.resize(2048);
-		MLHA_j_start_end_vec.resize(2048);
+		MLHA_submitted = 0;
+		all_reduce_pt_vec.resize(8);
+		MLHA_j_start_end_vec.resize(8);
 	}
 	yhccl_contexts *ctx;
 
 	/* data */
 	int inter_intra_ratio;
 
-	char *push_MLHA()
+	char* push_MLHA()
 	{
 		PT_BEGIN(&MLHA_pt);
 		for (MLHA_ss = ctx->intra_node_rank * inter_intra_ratio; MLHA_ss < MLHA_total_slicen; MLHA_ss += (MLHA_leadern * inter_intra_ratio))
@@ -3381,78 +3546,98 @@ struct pjt_inter_node_allreduce_MCC
 					if (ctx->intra_node_procn != 1)
 						while (ctx->allreduce_flags[MLHA_j] != ctx->intra_node_procn)
 						{
-							// if (MLHA_i_prev < MLHA_i)
-							// 	if (all_reduce_pt_vec[MLHA_i_prev].allreduce_inplace_finished == 1)
-							// 	{
-							// 		memory_fence();
-							// 		for (MLHA_j = MLHA_j_start_end_vec[MLHA_i_prev].first; MLHA_j < MLHA_j_start_end_vec[MLHA_i_prev].second; MLHA_j++)
-							// 			ctx->allreduce_flags[MLHA_j] = ctx->intra_node_procn + 1;
-							// 		MLHA_i_prev++;
-							// 		continue;
-							// 	}
-
-							for (int j = MLHA_i_prev; j < MLHA_i; j++)
+							for (int j = 1; j <= MLHA_submitted; j++)
 							{
-								if (all_reduce_pt_vec[j].allreduce_inplace_finished != 1)
-									all_reduce_pt_vec[j].push();
+									int index = (MLHA_submitted_max + MLHA_ind - j) % MLHA_submitted_max;
+									if (all_reduce_pt_vec[index].allreduce_inplace_finished != 1)
+								all_reduce_pt_vec[index].push();
 							}
 							PT_YIELD(&MLHA_pt);
 						}
 				}
-				memory_fence();
-				// printf("start rank=%d mystart=%d,MLHA_myend=%d MLHA_local_ct=%d\n", ctx->global_rank, MLHA_ss, MLHA_myend, MLHA_local_ct);
+				// memory_fence();
+				// if (ctx->inter_node_rank == 0)
+				// 	printf("start rank=%d mystart=%d,MLHA_myend=%d MLHA_local_ct=%d\n", ctx->global_rank, MLHA_ss, MLHA_myend, MLHA_local_ct);
 				{
-					all_reduce_pt_vec[MLHA_i].clear_pjt_allreducer_pt();
-					all_reduce_pt_vec[MLHA_i].allreduce_inplace(MLHA_sendbuf + MLHA_ss * MLHA_slicesz * MLHA_elem_sz, MLHA_local_ct, MLHA_elem_sz, MLHA_fp, MLHA_i);
-					MLHA_j_start_end_vec[MLHA_i].first = MLHA_ss;
-					MLHA_j_start_end_vec[MLHA_i].second = MLHA_myend;
+					while (MLHA_submitted == MLHA_submitted_max)
+					{
+						if (all_reduce_pt_vec[MLHA_ind].allreduce_inplace_finished != 1)
+						{
+							all_reduce_pt_vec[MLHA_ind].push();
+							for (int j = 1; j <= MLHA_submitted; j++)
+							{
+									int index = (MLHA_submitted_max + MLHA_ind - j) % MLHA_submitted_max;
+									if (all_reduce_pt_vec[index].allreduce_inplace_finished != 1)
+								all_reduce_pt_vec[index].push();
+							}
+							PT_YIELD(&MLHA_pt);
+						}
+						else
+						{
+							--MLHA_submitted;
+							// memory_fence();
+							for (MLHA_i = MLHA_j_start_end_vec[MLHA_ind].first; MLHA_i < MLHA_j_start_end_vec[MLHA_ind].second; MLHA_i++)
+									ctx->allreduce_flags[MLHA_i] = ctx->intra_node_procn + 1;
+						}
+					}
 
-					// while (all_reduce_pt_vec[MLHA_i].allreduce_inplace_finished != 1)
+
+					all_reduce_pt_vec[MLHA_ind].allreduce_inplace(MLHA_sendbuf + MLHA_ss * MLHA_slicesz * MLHA_elem_sz, MLHA_local_ct, MLHA_elem_sz, MLHA_fp, MLHA_ind);	
+					MLHA_j_start_end_vec[MLHA_ind].first = MLHA_ss;
+					MLHA_j_start_end_vec[MLHA_ind].second = MLHA_myend;
+					MLHA_submitted++;
+
+
+
+
+
+
+					MLHA_ind = (MLHA_ind + 1) % MLHA_submitted_max;
+					
+
+					// while (all_reduce_pt_vec[MLHA_ind].allreduce_inplace_finished != 1)
 					// {
 					// 	{
-					// 		all_reduce_pt_vec[MLHA_i].push();
+					// 		all_reduce_pt_vec[MLHA_ind].push();
 					// 		PT_YIELD(&MLHA_pt);
 					// 	}
 					// }
-					// allreduce_inplace(MLHA_sendbuf + MLHA_ss * MLHA_slicesz * MLHA_elem_sz, MLHA_local_ct, MLHA_elem_sz, MLHA_fp, 0);
-					// while (allreduce_inplace_finished != 1)
-					// {
-					// 	push();
-					// 	PT_YIELD(&MLHA_pt);
-					// }
-					// auto p = iallreduce_inplace(sendbuf + MLHA_ss * slicesz * elem_sz, MLHA_local_ct, elem_sz, fp, 0);
-					// while (p)
-					// {
-					//     p();
-					//     co_yield 0;
-					// }
-					// printf("end rank=%d mystart=%d,MLHA_myend=%d MLHA_local_ct=%d\n", ctx->global_rank, MLHA_ss, MLHA_myend, MLHA_local_ct);
-					// memory_fence();
+
+
 					// for (MLHA_j = MLHA_ss; MLHA_j < MLHA_myend; MLHA_j++)
 					// {
 					// 	ctx->allreduce_flags[MLHA_j] = ctx->intra_node_procn + 1;
 					// }
 				}
-				MLHA_i++;
 			}
 		}
-		// if (0)
-		while (MLHA_i_prev < MLHA_i)
+		MLHA_ind = (MLHA_submitted_max + MLHA_ind - MLHA_submitted) % MLHA_submitted_max;
+		while (MLHA_submitted > 0)
 		{
-			if (all_reduce_pt_vec[MLHA_i_prev].allreduce_inplace_finished == 1)
+			if (all_reduce_pt_vec[MLHA_ind].allreduce_inplace_finished != 1)
 			{
-				memory_fence();
-				for (MLHA_j = MLHA_j_start_end_vec[MLHA_i_prev].first; MLHA_j < MLHA_j_start_end_vec[MLHA_i_prev].second; MLHA_j++)
-					ctx->allreduce_flags[MLHA_j] = ctx->intra_node_procn + 1;
-				MLHA_i_prev++;
-				continue;
+				all_reduce_pt_vec[MLHA_ind].push();
+				for (int j = 0; j < MLHA_submitted; j++)
+				{
+					int index = (MLHA_ind + j) % MLHA_submitted_max;
+					if (all_reduce_pt_vec[index].allreduce_inplace_finished != 1)
+						all_reduce_pt_vec[index].push();
+				}
+				PT_YIELD(&MLHA_pt);
 			}
-			for (int j = MLHA_i_prev; j < MLHA_i; j++)
+			else
 			{
-				if (all_reduce_pt_vec[j].allreduce_inplace_finished != 1)
-					all_reduce_pt_vec[j].push();
+				--MLHA_submitted;
+				// memory_fence();
+				for (MLHA_i = MLHA_j_start_end_vec[MLHA_ind].first; MLHA_i < MLHA_j_start_end_vec[MLHA_ind].second; MLHA_i++)
+					ctx->allreduce_flags[MLHA_i] = ctx->intra_node_procn + 1;
+				MLHA_ind = (MLHA_ind + 1) % MLHA_submitted_max;
 			}
-			PT_YIELD(&MLHA_pt);
+		}
+
+		for (int i = 0; i < MLHA_submitted_max; i++)
+		{
+			all_reduce_pt_vec[i].clear_pjt_allreducer_pt();
 		}
 		MLHA_finished = 1;
 		PT_END(&MLHA_pt);
@@ -3463,7 +3648,8 @@ struct pjt_inter_node_allreduce_MCC
 	int MLHA_ss;
 	int MLHA_j;
 	int MLHA_local_ct;
-
+	int MLHA_submitted;
+	int MLHA_ind;
 	int MLHA_finished = 0;
 	struct pt MLHA_pt;
 	int MLHA_leadern;
@@ -3478,28 +3664,32 @@ struct pjt_inter_node_allreduce_MCC
 	void multi_leader_hierarchy_allreduce(int leadern, int slicesz, int total_slicen, void *sendbuf, int count, int elem_sz, MPI_Op mpi_op, yhccl_op fp, MPI_Datatype mpitype)
 	{
 		inter_intra_ratio = ctx->_opt.inter_node_slice_ct_ratio;
+		MLHA_submitted = 0;
+		MLHA_ind=0;
+		MLHA_submitted_max =ctx->_opt.MLHA_submitted_max;
 		mpi_fp = mpi_op;
 		MLHA_finished = 0;
 		const bool am_i_inter_node = (ctx->intra_node_rank < leadern) && (ctx->inter_node_procn > 1);
 		MLHA_pt.lc = NULL;
 		MLHA_i = 0;
-		MLHA_i_prev = 0;
+		MLHA_i_prev=0;
 		MLHA_leadern = leadern;
 		MLHA_slicesz = slicesz;
 		MLHA_total_slicen = total_slicen;
-		int needct = 1 + total_slicen / (ctx->intra_node_procn * inter_intra_ratio);
-		if (needct > all_reduce_pt_vec.size())
-		{
-			// puts("3235 all_reduce_pt_vec.resize()");
-			// fflush(stdout);
-			all_reduce_pt_vec.resize(needct);
-			MLHA_j_start_end_vec.resize(needct);
-		}
+		// int needct = 1 + total_slicen / (ctx->intra_node_procn * inter_intra_ratio);
+		// if(needct > all_reduce_pt_vec.size())
+		// {
+		// 	// puts("3235 all_reduce_pt_vec.resize()");
+		// 	// fflush(stdout);
+		// 	all_reduce_pt_vec.resize(needct);
+		// 	MLHA_j_start_end_vec.resize(needct);
+		// }
 		MLHA_sendbuf = sendbuf;
 		MLHA_count = count;
 		MLHA_elem_sz = elem_sz;
 		MLHA_fp = fp;
 		mpi_datatype = mpitype;
+		MLHA_submitted = 0;
 
 		if (am_i_inter_node)
 		{
@@ -3513,13 +3703,104 @@ struct pjt_inter_node_allreduce_MCC
 			// printf("rank=%d multi_leader_hierarchy_allreduce leadern=%d inter_intra_ratio=%d ctx->inter_node_procn=%d\n", ctx->intra_node_rank, leadern, inter_intra_ratio, ctx->inter_node_procn);
 			MLHA_finished = 1;
 		}
+		// printf("%d\n",sizeof(pjt_allreduce_pt_individual_buffer));
 	}
 	std::vector<pjt_allreduce_pt_individual_buffer> all_reduce_pt_vec;
-	std::vector<std::pair<int, int>> MLHA_j_start_end_vec;
+	std::vector<std::pair<int,int>> MLHA_j_start_end_vec;
 };
 
+MPI_Datatype MCC_search_type;
+MPI_Op MPI_search_MIN;
+void inter_node_hierarchy_auto_tune(int size)
+{
+    static MCC_option mcc_opt;
+    static std::unordered_map<int,int> s_to_A;
+	static std::unordered_map<int, std::pair<int, int>> s_to_AB;
+	yhccl_contexts *ctx = yhccl_contexts::_ctx;
+	if (ctx->inter_node_procn > 1 && ctx->_opt.dynamical_tune == true)
+	{
+		if (ctx->_opt.inter_node_algorithm == 2)
+		{
+			if (s_to_A.find(size) == s_to_A.end())
+			{
+				int minA = -1;
+				double re = 99999999999.0;
+				for (int A = 1; A <= ctx->inter_node_procn; A++)
+				{
+					if ((ctx->inter_node_procn % A) == 0)
+					{
+						int B = ctx->inter_node_procn / A;
+						int s = size;
+						int ppn = ctx->intra_node_procn;
+						double tmp = mcc_opt.MCC_all_reduce_model(s, ppn, A, B, 2);
+						if (tmp < re)
+						{
+							minA = A;
+							re = tmp;
+						}
+					}
+				}
+				s_to_A[size] = minA;
+				ctx->_opt.pp_zni = minA;
+				// if(ctx->global_rank == 0)
+				//     printf("size = %d A=%d B=%d\n", count * elem_sz, minA, ctx->inter_node_procn / minA);
+				// MPI_Barrier(MPI_COMM_WORLD);
+			}
+			else
+			{
+				ctx->_opt.pp_zni = s_to_A[size];
+			}
+		}
+		else if (ctx->_opt.inter_node_algorithm == 6)
+		{
+
+			if (s_to_AB.find(size) == s_to_AB.end())
+			{
+				All_reduce_mcc_search_A_B_C search, best_search;
+				search.e = 9999999999.0;
+				search.A = ctx->inter_node_rank + 1;
+				// search.A = 1;
+				if ((ctx->inter_node_procn % search.A) == 0)
+				{
+					int B_max = ctx->inter_node_procn / search.A;
+					for (int B = 1; B <= B_max; B++)
+					{
+						if (B_max % B == 0)
+						{
+							int C = B_max / B;
+							double tmp = mcc_opt.MCC_all_reduce_model_two_level(size, ctx->intra_node_procn, search.A, B, C, 4);
+							if (tmp < search.e)
+							{
+									search.e = tmp;
+									search.B = B;
+									// search.C = C;
+							}
+						}
+					}
+				}
+				PMPI_Reduce(&search, &best_search, 1, MCC_search_type, MPI_search_MIN, 0, ctx->Comm_inter_node);
+				MPI_Bcast(&best_search, 1, MCC_search_type, 0, ctx->Comm_inter_node);
+				// MPI_Allreduce(&search, &best_search, 1, MCC_search_type, MPI_search_MIN, ctx->Comm_inter_node);
+				s_to_AB[size] = std::make_pair(best_search.A, best_search.B);
+				// if (ctx->global_rank == 0)
+				// 	fprintf(stderr, "\n size = %d A=%d B = %d C=%d estimation=%lf: ", size, best_search.A, best_search.B, ctx->inter_node_procn / (best_search.A * best_search.B), best_search.e);
+				MPI_Barrier(MPI_COMM_WORLD);
+			}
+
+			ctx->_opt.pp_zni = (s_to_AB[size].first);
+			ctx->_opt.pp_chip = (s_to_AB[size].second);
+		}
+		// for(search.B = 1;search.B<=ctx->)
+	}
+	else
+	{
+		ctx->_opt.pp_zni = ctx->intra_zni_procn;
+		ctx->_opt.pp_chip = ctx->intra_chip_procn;
+	}
+}
 void innerf7(const void *datasend, void *datarecv, int count, int elem_sz, MPI_Datatype mpitype, MPI_Op mpi_op, yhccl_op fp)
 {
+	// pjt_reset_pjt_yield_counter();
 	innerf7_ct++;
 	// return;
 	// 节点内numa分层规约
@@ -3527,26 +3808,25 @@ void innerf7(const void *datasend, void *datarecv, int count, int elem_sz, MPI_D
 	pjt_mpiop = mpi_op;
 	yhccl_contexts *ctx = yhccl_contexts::_ctx;
 	// MPI_Barrier(ctx->Comm_intra_node);
-	// if (ctx->intra_node_rank == 0)
+	// if (ctx->global_rank == 0)
 	// 	printf("%d innerf7 count=%d \n", ctx->intra_node_rank, count);
 	// fflush(stdout);
-	// MPI_Barrier(ctx->Comm_intra_node);
 	int leadern = std::min(ctx->_opt.qp_vp_count, ctx->intra_node_procn);
 	int step;
-	// ls -al
-
+	//ls -al
+	
 	if (ctx->_opt.dynamical_tune)
 	{
 		// step = std::max(std::min((count) / (ctx->_opt.core_per_numa), ctx->_opt.intra_node_reduce_byte_unit / elem_sz), 8192 / elem_sz);
 		step = std::min(count / (ctx->intra_node_procn), ctx->_opt.intra_node_reduce_byte_unit / elem_sz);
-		// 4096的倍数11
-		int minstep = 64 / elem_sz;
+		//4096的倍数11
+		int minstep=64/elem_sz;
 		int stept = ((int)(step / minstep));
-		stept *= minstep;
+		stept*=minstep;
 		if (stept < step)
-			step = stept + minstep;
+		 	step = stept + minstep;
 		else
-			step = stept;
+		 	step = stept;
 		// step = ctx->_opt.intra_node_reduce_byte_unit / elem_sz;
 		// step = (count) / (ctx->intra_node_procn);
 	}
@@ -3554,31 +3834,35 @@ void innerf7(const void *datasend, void *datarecv, int count, int elem_sz, MPI_D
 	{
 		step = ctx->_opt.intra_node_reduce_byte_unit / elem_sz;
 	}
+	// inter_node_hierarchy_auto_tune(step * elem_sz* ctx->intra_node_procn * ctx->_opt.inter_node_slice_ct_ratio);
+	MPI_Barrier(ctx->Comm_intra_node);
+	inter_node_hierarchy_auto_tune(count * elem_sz);
 	// if(ctx->global_rank ==0)
 
-	// 节点内的规约step
-	//  int step = ctx->_opt.intra_node_reduce_byte_unit / elem_sz;
+	//节点内的规约step
+	// int step = ctx->_opt.intra_node_reduce_byte_unit / elem_sz;
 	long long intra_node_pn = ctx->intra_node_procn;
 	long long total_steps = count / step + (count % step == 0 ? 0 : 1);
-	MPI_Barrier(ctx->Comm_intra_node);
+	// MPI_Barrier(ctx->Comm_intra_node);
 
-	if (ctx->intra_node_rank == 0)
+	if (ctx->inter_node_procn > 1 && ctx->intra_node_rank == 0)
 	{
-		// 清理所有内存标志。1
-		int ct = total_steps + ctx->intra_node_procn * 3;
+		//清理所有内存标志。1
+		int ct = total_steps+6;
 		memset(ctx->allreduce_flags, -1, ct * sizeof(long long));
 	}
+	MPI_Barrier(ctx->Comm_intra_node);
 
-	for (int ss = 0, sliceid_start = 0; ss < count; ss += ctx->intra_node_procn * step, sliceid_start += ctx->intra_node_procn)
-	{
-		// printf("")
-		ctx->allreduce_flags[64] = intra_node_pn;
-		// __sync_lock_test_and_set(ctx->allreduce_flags + ctx->intra_node_rank,(long long)ctx->intra_node_procn);
-	}
+	// for (int ss = 0, sliceid_start = 0; ss < count; ss += ctx->intra_node_procn * step, sliceid_start += ctx->intra_node_procn)
+	// {
+	// 	// printf("")
+	// 	ctx->allreduce_flags[64] = intra_node_pn;
+	// 	// __sync_lock_test_and_set(ctx->allreduce_flags + ctx->intra_node_rank,(long long)ctx->intra_node_procn);
+	// }
 	static NUMA_RS_Coroutine RS;
 	RS.hierarchy_reduce_scatter(datasend, count, elem_sz, mpitype, mpi_op, fp, step, total_steps);
 	static pjt_inter_node_allreduce_MCC AR;
-	if (ctx->inter_node_procn > 0)
+	if(ctx->inter_node_procn > 0)
 	{
 		if (ctx->intra_node_procn == 1)
 		{
@@ -3587,113 +3871,145 @@ void innerf7(const void *datasend, void *datarecv, int count, int elem_sz, MPI_D
 		else
 			AR.multi_leader_hierarchy_allreduce(leadern, step, total_steps, ctx->larger_msg_allreduce_result_start_0, count, elem_sz, mpi_op, fp, mpitype);
 	}
-	MPI_Barrier(MPI_COMM_WORLD);
+	// MPI_Barrier(MPI_COMM_WORLD);
 	// if(ctx->intra_node_rank == 0)
 	// 	puts("==============================3398==================================");
 	// fflush(stdout);
 	// MPI_Barrier(MPI_COMM_WORLD);
-
+	
 	static NUMA_AG_Coroutine AG;
-	AG.intra_node_all_gather(datarecv, count, elem_sz, step, total_steps);
-
-	// if (0)
+	AG.intra_node_all_gather(datarecv, count, elem_sz, step, total_steps,leadern);
+	
 	{
 
-		if (ctx->_opt.using_non_temporal == 3)
-		{
-			while (RS.RS_finished != 1 || AG.AG_finished != 1)
-			{
-				if (RS.RS_finished != 1)
-					RS.push();
-				if (AG.AG_finished != 1)
-					AG.push();
-			}
-			// while (AG.AG_finished != 1)
-			// {
-			// 		if (AG.AG_finished != 1)
-			// 			AG.push();
-			// }
-		}
-		else
-		// if(0)
-		{
-			while (RS.RS_finished != 1)
-			{
-				/* code */
-				if (RS.RS_finished != 1)
-					RS.push();
-			}
+		// if (ctx->_opt.using_non_temporal == 3)
+		// {
+		// 	while (RS.RS_finished != 1 || AG.AG_finished != 1)
+		// 	{
+		// 			if (RS.RS_finished != 1)
+		// 				RS.push();
+		// 			if (AG.AG_finished != 1)
+		// 				AG.push();
+		// 	}
+		// 	// while (AG.AG_finished != 1)
+		// 	// {
+		// 	// 		if (AG.AG_finished != 1)
+		// 	// 			AG.push();
+		// 	// }
+		// }
+		// else
+		// // if(0)
+		// {
+		// 	while (RS.RS_finished != 1)
+		// 	{
+		// 			/* code */
+		// 			if (RS.RS_finished != 1)
+		// 				RS.push();
+		// 	}
 
-			MPI_Barrier(ctx->Comm_intra_node);
-			const void *sourceb = RS.dest_buf;
-			// ->larger_msg_allreduce_result_start_0;
+		// 	MPI_Barrier(ctx->Comm_intra_node);
+		// 	const void * sourceb = RS.dest_buf;
+		// 	// ->larger_msg_allreduce_result_start_0;
 
-			if (count * elem_sz <= 256 * 1024)
-			{
-				const void *sourceb1 = sourceb + count * elem_sz;
-				if (ctx->intra_node_rank == ctx->intra_node_procn / 2)
-					memmove(sourceb1, sourceb, count * elem_sz);
-				MPI_Barrier(ctx->Comm_intra_node);
-				if (ctx->intra_node_rank >= ctx->intra_node_procn / 2)
-					sourceb = sourceb1;
-			}
-			if (ctx->_opt.intra_node_reduce_type != CacheEfficient)
-			// if(ctx->intra_node_rank != 0)
-			{
-				if (ctx->_opt.using_non_temporal == 0)
-				{
-					pjt_memmove(datarecv, sourceb, count * elem_sz);
-				}
-				else if (ctx->_opt.using_non_temporal == 1)
-				{
-					pjt_target_cachebypass_memmove(datarecv, sourceb, count * elem_sz);
-					// int minsz = std::min(ctx->_opt.NT_boundary_msg_sz, count * elem_sz);
-					// pjt_memmove(datarecv, ctx->larger_msg_allreduce_result_start_0, minsz);
-					// if (count * elem_sz - minsz > 0)
-					// 		pjt_target_cachebypass_memmove(datarecv + minsz, ctx->larger_msg_allreduce_result_start_0 + minsz, count * elem_sz - minsz);
-				}
-				else
-				{
-					pjt_target_cachebypass_memmove(datarecv, sourceb, count * elem_sz);
-					// memmove(datarecv, ctx->larger_msg_allreduce_result_start_0, count * elem_sz);
-				}
-			}
-			else
-			{
-				memmove(datarecv, sourceb, count * elem_sz);
-			}
-		}
-		if (RS.RS_finished != 1)
-		{
-			RS.push();
-			MPI_Barrier(ctx->Comm_intra_node);
-		}
-		while (RS.RS_finished != 1 || AR.MLHA_finished != 1)
+        //     if (count * elem_sz <= 256*1024)
+		// 	{
+		// 			const void *sourceb1 = sourceb + count * elem_sz;
+		// 			if (ctx->intra_node_rank == ctx->intra_node_procn / 2)
+		// 				memmove(sourceb1, sourceb, count * elem_sz);
+		// 			MPI_Barrier(ctx->Comm_intra_node);
+		// 			if (ctx->intra_node_rank >= ctx->intra_node_procn / 2)
+		// 				sourceb = sourceb1;
+		// 	}
+		// 	if (ctx->_opt.intra_node_reduce_type != CacheEfficient)
+		// 	// if(ctx->intra_node_rank != 0)
+		// 	{
+		// 			if (ctx->_opt.using_non_temporal == 0)
+		// 			{
+		// 				pjt_memmove(datarecv, sourceb, count * elem_sz);
+		// 			}
+		// 			else if (ctx->_opt.using_non_temporal == 1)
+		// 			{
+		// 				pjt_target_cachebypass_memmove(datarecv, sourceb, count * elem_sz);
+		// 				// int minsz = std::min(ctx->_opt.NT_boundary_msg_sz, count * elem_sz);
+		// 				// pjt_memmove(datarecv, ctx->larger_msg_allreduce_result_start_0, minsz);
+		// 				// if (count * elem_sz - minsz > 0)
+		// 				// 		pjt_target_cachebypass_memmove(datarecv + minsz, ctx->larger_msg_allreduce_result_start_0 + minsz, count * elem_sz - minsz);
+		// 			}
+		// 			else
+		// 			{
+		// 				pjt_target_cachebypass_memmove(datarecv, sourceb, count * elem_sz);
+		// 				// memmove(datarecv, ctx->larger_msg_allreduce_result_start_0, count * elem_sz);
+		// 			}
+		// 	}
+		// 	else
+		// 	{
+		// 			memmove(datarecv, sourceb, count * elem_sz);
+		// 	}
+		// }
+		// while
+		//  (RS.RS_finished != 1)
+		// {
+		// 	RS.push();
+		// }
+		
+	// MPI_Barrier(MPI_COMM_WORLD);
+	// if(ctx->intra_node_rank == 0)
+	// 	puts("==============================3398==================================");
+	// fflush(stdout);
+	// MPI_Barrier(MPI_COMM_WORLD);
+	// while( AG.AG_finished != 1)
+	// 			AG.push();
+	if(ctx->_opt.overlapping_inter_node_with_intra_node == true)
+	{
+		while (
+			RS.RS_finished != 1||
+			AR.MLHA_finished != 1 
+		 ||AG.AG_finished != 1
+		 )
 		{
 			if (RS.RS_finished != 1)
 				RS.push();
-			if (AR.MLHA_finished != 1)
+			if(AR.MLHA_finished != 1)
 				AR.push_MLHA();
+			if(AG.AG_finished != 1)
+				AG.push();
 		}
-		while (AR.MLHA_finished != 1)
+	}else{
+		while (RS.RS_finished != 1)
 		{
-			if (AR.MLHA_finished != 1)
+			RS.push();
+		}
+		while(AR.MLHA_finished != 1)
+		{
 				AR.push_MLHA();
 		}
-		// MPI_Barrier(ctx->Comm_intra_node);
-		while (AG.AG_finished != 1)
-			AG.push();
-		// while (RS.RS_finished != 1||AR.MLHA_finished != 1 || AG.AG_finished != 1)
-		// {
-		// 	if (RS.RS_finished != 1)
-		// 		RS.push();
-		// 	if(AR.MLHA_finished != 1)
-		// 		AR.push_MLHA();
-		//     if (AG.AG_finished != 1)
-		//         AG.push();
-		// }
+		while(AG.AG_finished != 1)
+				AG.push();
+		
 	}
+		
+	// MPI_Barrier(MPI_COMM_WORLD);
+	MPI_Barrier(ctx->Comm_intra_node);
+	// if(ctx->intra_node_rank == 0)
+	// 	puts("==============================3399==================================");
+	// fflush(stdout);
+	// MPI_Barrier(MPI_COMM_WORLD);
+	// MPI_Barrier(ctx->Comm_intra_node);
+	// while( AG.AG_finished != 1)
+	// 			AG.push();
+		// while (AR.MLHA_finished != 1)
+		// {
+		// 		if (AR.MLHA_finished != 1)
+		// 			AR.push_MLHA();
+		// }
+
+	}
+	// int yield_counter = get_pjt_yield_counter();
+	// if(ctx->global_rank == 0){
+	// printf("yield_counter= %d\n", yield_counter);
+	// }
 }
+
 
 int pjt_memory_bandwidth_efficient_allreduce(const void *datasend, void *datarecv, int count, int elem_sz, MPI_Datatype mpitype, MPI_Op mpi_op, yhccl_op fp)
 {
@@ -3716,3 +4032,7 @@ int pjt_memory_bandwidth_efficient_allreduce(const void *datasend, void *datarec
 	}
 	return 0;
 }
+
+
+
+

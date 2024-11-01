@@ -5,7 +5,7 @@
 
 // #define PAPI
 // #define IPH_NUMA
-#define PJT_AVX_ASSEMBLY_MEMCPY
+// #define PJT_AVX_ASSEMBLY_MEMCPY
 #ifdef PJT_MPI
 
 #include "../coll_yhccl.h"

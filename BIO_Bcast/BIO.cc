@@ -123,7 +123,14 @@ void shared_mem() {
     }
 
     //创建共享内存
-    bio_shm_fd = shm_open("bcast_ppppp_optim_adapt", O_CREAT | O_RDWR | O_TRUNC, 0777);
+    char host_name[64], name[64];
+    int namelen;
+    
+    MPI_Get_processor_name(host_name, &namelen);
+    sprintf(name, "rm /dev/shm/bio-test653-%s -rf", host_name);
+    sprintf(name, "bio-test653-%s", host_name);
+    // "bcast_ppppp_optim_adapt"
+    bio_shm_fd = shm_open(name, O_CREAT | O_RDWR | O_TRUNC, 0777);
     assert(bio_shm_fd >= 0);
 
     if (ftruncate(bio_shm_fd, bio_buff_size) == -1) {
@@ -236,9 +243,9 @@ int BIO_Bcast(void* buffer, int count, MPI_Datatype datatype, int root, MPI_Comm
     if (!init_f) {
         PMPI_Comm_rank(MPI_COMM_WORLD, &m_rank);
         PMPI_Comm_size(MPI_COMM_WORLD, &size);
-        if (root == m_rank) {
-            puts(" =========== BIO Bcast ===========");
-        }
+        // if (root == m_rank) {
+        //     puts(" =========== BIO Bcast ===========");
+        // }
     }
     // if (m_rank == 0) {
     //     static int ccc = 0;
