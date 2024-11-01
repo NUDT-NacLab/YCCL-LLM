@@ -51,7 +51,7 @@ else()
 ENDIF()
 
 # PJT_AVX_ASSEMBLY_MEMCPY
-option(PJT_AVX_ASSEMBLY_MEMCPY "PJT_AVX_ASSEMBLY_MEMCPY option" ON)
+# option(PJT_AVX_ASSEMBLY_MEMCPY "PJT_AVX_ASSEMBLY_MEMCPY option" ON)
 
 if(DEFINED PJT_AVX_ASSEMBLY_MEMCPY)
     message(STATUS "PJT_AVX_ASSEMBLY_MEMCPY defined: " ${PJT_AVX_ASSEMBLY_MEMCPY})
@@ -62,7 +62,7 @@ else()
     set("")
 endif()
 
-# option(PJT_ARM_ASSEMBLY_MEMCPY "PJT_ARM_ASSEMBLY_MEMCPY option" ON)
+option(PJT_ARM_ASSEMBLY_MEMCPY "PJT_ARM_ASSEMBLY_MEMCPY option" ON)
 if(DEFINED PJT_ARM_ASSEMBLY_MEMCPY)
     message(STATUS "PJT_ARM_ASSEMBLY_MEMCPY defined: " ${PJT_ARM_ASSEMBLY_MEMCPY})
     add_definitions(-DPJT_ARM_ASSEMBLY_MEMCPY)
@@ -89,8 +89,8 @@ add_compile_options(-O3)
 
 # add_compile_options(-O1)
 
-add_compile_options(-fcoroutines)
-add_compile_options(-std=c++20)
+# add_compile_options(-fcoroutines)
+# add_compile_options(-std=c++20)
 add_compile_options(-fopenmp)
 add_compile_options(-fpermissive)
 add_definitions(-w)
