@@ -3,9 +3,7 @@
 #include <vector>
 #include <omp.h>
 #include <algorithm>
-#include <unordered_map>
-// #include <pair>
-#include "yhccl_options.h"
+
 // #include "./protothreads/pt-sem.h"
 #define Intra_node_reduce
 #define Inter_node_allreduce
@@ -23,22 +21,23 @@ void yhccl_allreduce_callback(req_content *req_ctt)
 {
     puts("error out");
     exit(0);
-    //通信线程内收到allreduce通信请求的回调函数
-    //     allreduce_req_content *allreduce_req_ctt = req_ctt;
-    // #ifdef Inter_node_allreduce
-    //     MPI_Allreduce(MPI_IN_PLACE,
-    //                   allreduce_req_ctt->outbuf,
-    //                   allreduce_req_ctt->count,
-    //                   allreduce_req_ctt->datatype,
-    //                   allreduce_req_ctt->mpi_op,
-    //                   allreduce_req_ctt->comm);
-    // #endif
-    // puts("57");
-    // ffprintf(stderr,stderr,"grank = %d proc data size=%d addr=%p\n", yhccl_contexts::_ctx->global_rank, allreduce_req_ctt->count * sizeof(float), allreduce_req_ctt->outbuf);
-    // fflush(stdout);
-    // for (int i = 0; i < allreduce_req_ctt->count; i++)
-    //     ((float *)allreduce_req_ctt->outbuf)[i] *= 2.0;
+    // 通信线程内收到allreduce通信请求的回调函数
+    //      allreduce_req_content *allreduce_req_ctt = req_ctt;
+    //  #ifdef Inter_node_allreduce
+    //      MPI_Allreduce(MPI_IN_PLACE,
+    //                    allreduce_req_ctt->outbuf,
+    //                    allreduce_req_ctt->count,
+    //                    allreduce_req_ctt->datatype,
+    //                    allreduce_req_ctt->mpi_op,
+    //                    allreduce_req_ctt->comm);
+    //  #endif
+    //  puts("57");
+    //  ffprintf(stderr,stderr,"grank = %d proc data size=%d addr=%p\n", yhccl_contexts::_ctx->global_rank, allreduce_req_ctt->count * sizeof(float), allreduce_req_ctt->outbuf);
+    //  fflush(stdout);
+    //  for (int i = 0; i < allreduce_req_ctt->count; i++)
+    //      ((float *)allreduce_req_ctt->outbuf)[i] *= 2.0;
 }
+
 void Reduce_intra_node(const void *sendbuf, int count, int elem_sz, yhccl_op op, int *counts, int *starts)
 {
     yhccl_contexts *ctx = yhccl_contexts::_ctx;
@@ -65,26 +64,31 @@ void Reduce_intra_node(const void *sendbuf, int count, int elem_sz, yhccl_op op,
     {
         for (int i = 0; i < ctx->intra_node_procn; i++)
         {
-            int slice_lid = (i + ctx->intra_node_rank) % ctx->intra_node_procn;
-            int sliceStart = ss + slice_count * slice_lid;
-            int countl = std::min(count - sliceStart, slice_count);
+            int slice_lid = (i + ctx->intra_node_rank) % ctx->intra_node_procn; // 分片
+            int sliceStart = ss + slice_count * slice_lid;                      // 分片地址的开始
+            int countl = std::min(count - sliceStart, slice_count);             // 该分片的总大小
             if (countl > 0)
             {
+                // 分片存在
+                // 计算大消息allreduce结果的放置位置
                 void *dest = ctx->larger_msg_allreduce_result_start_0 + sliceStart * elem_sz;
+                // 找源地址位置
                 void *source = sendbuf + sliceStart * elem_sz;
 
+                // ???
                 if (ctx->_opt.intra_node_sync_type == Atomic_as_sync)
                 {
+                    //
                     while (ctx->allreduce_flags[slice_start + slice_lid] != i)
                         ;
                     memory_fence();
                 }
-#ifdef Intra_node_reduce
-                if (i == 0)
+#ifdef Intra_node_reduce    // 此部分对应 SC23 中的进程分配的节点内规约部分
+                if (i == 0) // 第一步的话就是一个copy
                 {
                     memcpy(dest, source, countl * elem_sz);
                 }
-                else
+                else // 其他步骤就是计算
                 {
                     op(source, dest, &countl, 0);
                 }
@@ -148,6 +152,7 @@ void Reduce_intra_node(const void *sendbuf, int count, int elem_sz, yhccl_op op,
     // exit(0);
 }
 
+// 方案作废
 void pipelined_dpml_memory_efficient(const void *datasend, int count, int elem_sz,
                                      yhccl_op fp, int *counts, int *starts,
                                      MPI_Datatype mpitype, MPI_Op mpi_op)
@@ -160,22 +165,22 @@ void pipelined_dpml_memory_efficient(const void *datasend, int count, int elem_s
     int total_steps = count / step + (count % step == 0 ? 0 : 1);
     MPI_Status status[total_steps];
     MPI_Request mpi_reqs[total_steps];
-    //使用c++20无栈协程implement internode。编译器最低gcc11.2.0以上。
+    // 使用c++20无栈协程implement internode。编译器最低gcc11.2.0以上。
     int *step_id = new int[1 + count / step];
     int reqn = 0;
     {
-        //规约部分
-        //每个进程负责其中的一部分;
+        // 规约部分
+        // 每个进程负责其中的一部分;
         int slice_start = 0;
         for (int ss = 0; ss < count; ss += ctx->intra_node_procn * step)
         {
-            //对每个大块
+            // 对每个大块
             void *dest = 0;
             int countl = 0;
             int slice_lid = -1;
             for (int i = 0; i < ctx->intra_node_procn; i++)
             {
-                //对每一个进程
+                // 对每一个进程
                 slice_lid = (i + ctx->intra_node_rank) % ctx->intra_node_procn;
                 int sliceStart = ss + step * slice_lid;
                 countl = std::min(count - sliceStart, step);
@@ -217,7 +222,6 @@ void pipelined_dpml_memory_efficient(const void *datasend, int count, int elem_s
     // if (0)
     // iph_iallreduce_wait(reqn, pjt_iallreduce);
     // MPI_Waitall(reqn, mpi_reqs, status);
-
     // return 0;
     //         yhccl_communicator _communicator = yhccl_communicator::get_instance();
     //         // puts("127");
@@ -227,7 +231,6 @@ void pipelined_dpml_memory_efficient(const void *datasend, int count, int elem_s
     //         starts[0] = 0;
     //         void *slice_addr_c1 = 0;
     //         int count_c1 = 0;
-
     //         for (int i = 1; i < ctx->intra_node_procn; i++)
     //         {
     //             int tmp = slice_c;
@@ -242,7 +245,6 @@ void pipelined_dpml_memory_efficient(const void *datasend, int count, int elem_s
     //         }
     //         // puts("199");
     //         // return;
-
     //         int slice_count = std::min(1 + count / ctx->intra_node_procn, ctx->_opt.intra_node_reduce_byte_unit / elem_sz);
     //         // if (0)
     //         int slice_start = 0;
@@ -331,7 +333,6 @@ void pipelined_dpml_memory_efficient(const void *datasend, int count, int elem_s
     //                             case THREAD_MPIALLREDUCE_AUTO:
     //                                 /* code */
     //                                 // ffprintf(stderr,stderr,"rank  = %d size=%d addr=%p enque\n", ctx->global_rank, count_c1 * sizeof(float), slice_addr_c1);
-
     //                                 if (ctx->using_multi_thread_communication)
     //                                 {
     //                                     allreduce_reqV.emplace_back(slice_addr_c1, count_c1, mpitype, mpi_op, ctx->Comm_inter_node);
@@ -357,7 +358,6 @@ void pipelined_dpml_memory_efficient(const void *datasend, int count, int elem_s
     //                                 // MPI_Allreduce(MPI_IN_PLACE, slice_addr_c1, count_c1, mpitype, mpi_op, ctx->Comm_inter_node);
     //                                 if (ctx->global_rank == 0)
     //                                     ffprintf(stderr,stderr,"DPML-pipe count_cl=%d\n", count_c1);
-
     //                                 break;
     //                             default:
     //                                 break;
@@ -396,6 +396,7 @@ void pipelined_dpml_memory_efficient(const void *datasend, int count, int elem_s
     // #endif
     // exit(0);
 }
+
 void Reduce_intra_node_onSHM(int count, int elem_sz, yhccl_op op, int *counts, int *starts)
 {
     yhccl_contexts *ctx = yhccl_contexts::_ctx;
@@ -429,7 +430,9 @@ void Reduce_intra_node_onSHM(int count, int elem_sz, yhccl_op op, int *counts, i
             for (int i = 0; i < ctx->intra_node_procn; i++)
             {
                 void *source = ctx->neigbbor_buffers[i] + ss * elem_sz;
+
                 // &(sendbuf[starts[slice_id]]);
+                // 此部分对应 SC23 中的进程分配的节点内规约部分
                 if (i == 0)
                 {
                     memcpy(dest, source, countl * elem_sz);
@@ -447,6 +450,7 @@ void Reduce_intra_node_onSHM(int count, int elem_sz, yhccl_op op, int *counts, i
 
 void Bcast_intra_node_memory_efficient(void *sendbufSHM, int count, int elem_sz, void *recvbuf)
 {
+    // 节点内广播
     yhccl_contexts *ctx = yhccl_contexts::_ctx;
     {
         int slice_count = ctx->_opt.intra_node_reduce_byte_unit * ctx->intra_node_procn / elem_sz;
@@ -483,8 +487,8 @@ void pipelined_dpml_cache_efficient(int count, int elem_sz, yhccl_op op, int *co
     int my_count = counts[ctx->intra_node_rank];
     int my_start = starts[ctx->intra_node_rank];
     int slice_sz = ctx->_opt.intra_node_reduce_byte_unit;
-    
-     slice_sz = 8192;
+
+    slice_sz = 8192;
     int slice_ct = std::min(count / (ctx->intra_node_procn), slice_sz / elem_sz);
     int sliceid = 0;
     int reqn = 0;
@@ -513,8 +517,8 @@ void pipelined_dpml_cache_efficient(int count, int elem_sz, yhccl_op op, int *co
                     }
                 }
             }
-            //规约完成之后立刻将该片送入规约。
-            // ffprintf(stderr,stderr," cache efficient countl=%d\n", countl);
+            // 规约完成之后立刻将该片送入规约。
+            //  ffprintf(stderr,stderr," cache efficient countl=%d\n", countl);
             if (ctx->inter_node_procn > 1 && countl > 0)
             {
                 volatile float *p = (volatile float *)(ctx->larger_msg_allreduce_result_start_0 + ss * elem_sz);
@@ -561,31 +565,43 @@ void pipelined_dpml_cache_efficient(int count, int elem_sz, yhccl_op op, int *co
     // MPI_Barrier(ctx->Comm_intra_node);
 }
 
-extern void pjt_swap(void **sendb,void **recvb);
+extern void pjt_swap(void **sendb, void **recvb);
 // {
 //     void * t = *sendb;
 //     *sendb = *recvb;
 //     *recvb = t;
 // }
+
+// 对应FMCC RT么？
+// ring allreduce
 void pjt_ring_all_reduce(const void *datasend, void *datarecv, int count, int elem_sz, MPI_Op mpi_op, yhccl_op reducefp = 0)
 {
+    // 获取上下文
     yhccl_contexts *ctx = yhccl_contexts::_ctx;
-    int  precv= (ctx->global_rank + 1) % ctx->global_procn;
-    int  next= (ctx->global_rank + ctx->global_procn - 1) % ctx->global_procn;
+    // 计算前驱后继进程
+    int precv = (ctx->global_rank + 1) % ctx->global_procn;
+    int next = (ctx->global_rank + ctx->global_procn - 1) % ctx->global_procn;
+    // 分片
     int step = count / (ctx->global_procn);
+    // 剩下的分片
     int remain = count % (ctx->global_procn);
-    if(remain!= 0)
+    if (remain != 0)
         step++;
+    // 设置接受发送buf
     static void *recvbuf = 0;
     if (recvbuf == 0)
         recvbuf = malloc(1 << 26);
     static void *sendbuf = 0;
     if (sendbuf == 0)
         sendbuf = malloc(1 << 26);
+    // TODO:这里需要再看一下
     MPI_Request reqs, reqr;
+
+    // ring allreduce 算法
     int r;
     for (r = 0; r < ctx->global_procn - 1; r++)
     {
+        // ring 的移动偏移
         int send_shift = (((ctx->global_rank + r) % ctx->global_procn) * step * elem_sz);
         int recv_shift = (((ctx->global_rank + 1 + r + ctx->global_procn) % ctx->global_procn) * step * elem_sz);
         int send_lsz = std::min(count * elem_sz - send_shift, step * elem_sz);
@@ -596,21 +612,24 @@ void pjt_ring_all_reduce(const void *datasend, void *datarecv, int count, int el
             recv_lsz = 0;
         if (r == 0)
         {
+            // 开始要从源buf开始
             // if (ctx->global_rank  == 0)
             //     printf("%d mid r=%d send_data=%f send_shift=%d\n", ctx->global_rank, r, ((float *)(datasend + send_shift))[0],send_shift);
             MPI_Isend(datasend + send_shift, send_lsz, MPI_CHAR, next, 0, MPI_COMM_WORLD, &reqs);
             MPI_Irecv(recvbuf, recv_lsz, MPI_CHAR, precv, 0, MPI_COMM_WORLD, &reqr);
+            // TODO:不知道为啥用MPI_CHAR
         }
         else
         {
+            // 否则就是从sendbuf 开始
             MPI_Isend(sendbuf, send_lsz, MPI_CHAR, next, 0, MPI_COMM_WORLD, &reqs);
             MPI_Irecv(recvbuf, recv_lsz, MPI_CHAR, precv, 0, MPI_COMM_WORLD, &reqr);
         }
-
+        // 等待传输完
         MPI_Wait(&reqs, MPI_STATUS_IGNORE);
         MPI_Wait(&reqr, MPI_STATUS_IGNORE);
 
-        // 先求和
+        // 先求和（op）
         if (r != (ctx->global_procn - 2))
         {
             // if (r == 0 && ctx->global_rank  == ctx->global_procn-1)
@@ -637,7 +656,7 @@ void pjt_ring_all_reduce(const void *datasend, void *datarecv, int count, int el
         }
         pjt_swap(&sendbuf, &recvbuf);
     }
-    r=ctx->global_procn - 2;
+    r = ctx->global_procn - 2;
     for (int t = 0; t < ctx->global_procn - 1; t++)
     {
         int send_shift = (((ctx->global_rank + 1 + r + t + ctx->global_procn) % ctx->global_procn) * step * elem_sz);
@@ -660,21 +679,29 @@ void pjt_ring_all_reduce(const void *datasend, void *datarecv, int count, int el
 }
 void intel_rg_all_reduce(const void *datasend, void *datarecv, int count, int elem_sz, MPI_Op mpi_op, yhccl_op reducefp = 0)
 {
-    //整个过程分威reduce和bcast部分。
+    // 整个过程分威reduce和bcast部分。
     yhccl_contexts *ctx = yhccl_contexts::_ctx;
     // if(ctx->global_rank == 0)
     // {
     //     printf("intel_rg_all_reduce\n");
     // }
+    // 分片
     int slice_sz = ctx->_opt.intra_node_reduce_byte_unit;
-    int step =  slice_sz / elem_sz;
+    // 分步
+    int step = slice_sz / elem_sz;
     // step = count;
     int total_steps = count / step + (count % step == 0 ? 0 : 1);
-	int	intra_numa_rank = ctx->intra_node_rank % (ctx->_opt.core_per_numa);
-	int	inter_numa_rank = ctx->intra_node_rank / (ctx->_opt.core_per_numa);
-	int	intra_numa_procn = ctx->_opt.core_per_numa;
-	int	inter_numa_procn = ctx->intra_node_procn / ctx->_opt.core_per_numa;
-	// MPI_Barrier(ctx->Comm_intra_node);
+    // numa内rank
+    int intra_numa_rank = ctx->intra_node_rank % (ctx->_opt.core_per_numa);
+    // numa间rank
+    int inter_numa_rank = ctx->intra_node_rank / (ctx->_opt.core_per_numa);
+    // numa内的总进程数
+    int intra_numa_procn = ctx->_opt.core_per_numa;
+    // numa间的进程数（就是几个numa？）
+    int inter_numa_procn = ctx->intra_node_procn / ctx->_opt.core_per_numa;
+    // MPI_Barrier(ctx->Comm_intra_node);
+
+    // TODO:K是啥意思
     int K = 2;
     int step_to_root = inter_numa_rank;
     int tmp = intra_numa_rank;
@@ -684,9 +711,10 @@ void intel_rg_all_reduce(const void *datasend, void *datarecv, int count, int el
         tmp = (tmp - 1) / K;
     }
     int parent = 0;
-    int childn=0;
-    int children[K+1];
-    if(intra_numa_rank != 0)
+    int childn = 0;
+    int children[K + 1];
+    // numa感知
+    if (intra_numa_rank != 0)
     {
         if (inter_numa_rank == 1)
             parent = ctx->global_procn / 2;
@@ -713,11 +741,12 @@ void intel_rg_all_reduce(const void *datasend, void *datarecv, int count, int el
         }
     }
 
-    int s =0 ;
+    int s = 0;
     int wait_id = 0;
     int tree_hight = 1;
     tmp = intra_numa_procn - 1;
-    while(tmp !=0){
+    while (tmp != 0)
+    {
         tree_hight++;
         tmp = (tmp - 1) / K;
     }
@@ -743,31 +772,33 @@ void intel_rg_all_reduce(const void *datasend, void *datarecv, int count, int el
     // {
     //     printf("total_steps+tree_hight=%d\n", total_steps + tree_hight);
     // }
-	// MPI_Barrier(ctx->Comm_intra_node);
+    // MPI_Barrier(ctx->Comm_intra_node);
     // exit(0);
 
-        // sleep(1);
+    // sleep(1);
     for (int h = 0; h < total_steps + tree_hight + 1; h++)
     {
         int s = h - my_level;
         if (s >= 0 && s < total_steps)
         {
-            //等待规约数据
+            // 等待规约数据
             int ct = std::min(count - s * step, step);
             if (childn > 0)
             {
-                float * c;
+                float *c;
                 for (int j = 0; j < childn; j++)
                 {
                     int child = children[j];
                     float *a = (float *)(ctx->neigbbor_buffers[child] + (s & 0x1) * step * elem_sz);
-                    float * b = (float *)(datasend + s * step * elem_sz);
-                    c = (float *)(ctx->neigbbor_buffers[ctx->intra_node_rank] + (s& 0x1)*step * elem_sz);
-                    if(j == 0)
+                    float *b = (float *)(datasend + s * step * elem_sz);
+                    c = (float *)(ctx->neigbbor_buffers[ctx->intra_node_rank] + (s & 0x1) * step * elem_sz);
+                    if (j == 0)
                     {
                         for (int h = 0; h < ct; h++)
                             c[h] = a[h] + b[h];
-                    }else{
+                    }
+                    else
+                    {
                         for (int h = 0; h < ct; h++)
                             c[h] += a[h];
                     }
@@ -777,7 +808,7 @@ void intel_rg_all_reduce(const void *datasend, void *datarecv, int count, int el
             }
             else
             {
-                memmove(ctx->neigbbor_buffers[ctx->intra_node_rank] + (s& 0x1)*step * elem_sz, datasend + s * step * elem_sz, ct * elem_sz);
+                memmove(ctx->neigbbor_buffers[ctx->intra_node_rank] + (s & 0x1) * step * elem_sz, datasend + s * step * elem_sz, ct * elem_sz);
             }
             // ctx->allreduce_flags[ctx->intra_node_rank] += 1;
         }
@@ -798,13 +829,13 @@ void intel_rg_all_reduce(const void *datasend, void *datarecv, int count, int el
     }
     MPI_Barrier(ctx->Comm_intra_node);
     // if (ctx->intra_node_rank == 0)
-        memmove(datarecv, ctx->neigbbor_buffers[0], count * elem_sz);
+    memmove(datarecv, ctx->neigbbor_buffers[0], count * elem_sz);
 }
 
-//支持一个通信子，任意通信通信操作，自定义allreduce操作。
-//每一个进程同时只能处于一个allreduce通信域中，否则会出错。
+// 支持一个通信子，任意通信通信操作，自定义allreduce操作。
+// 每一个进程同时只能处于一个allreduce通信域中，否则会出错。
 
-static void float_sum_abc(const float *a,float*b,float*c,int ct)
+static void float_sum_abc(const float *a, float *b, float *c, int ct)
 {
     for (int i = 0; i < ct; i++)
         c[i] = a[i] + b[i];
@@ -816,64 +847,66 @@ static void float_sum_ab(float *a, const float *b, int ct)
 }
 void Rabenseifner_reduce_scatter(const void *datasend, void *datarecv, int count, int elem_sz, MPI_Op mpi_op, yhccl_op reducefp = 0)
 {
-    //整个过程分威reduce和bcast部分。
+    // 整个过程分威reduce和bcast部分。
     yhccl_contexts *ctx = yhccl_contexts::_ctx;
     int rank = ctx->intra_node_rank;
     int procn = ctx->intra_node_procn;
-    int steps=0;
-    int t= procn;
-    while (t>1)
+    int steps = 0;
+    int t = procn;
+    while (t > 1)
     {
         steps++;
-        t/=2;
+        t /= 2;
     }
     void *buftmp = ctx->temp_buf;
     // ->neigbbor_buffers[rank]; //只接收
-    void *bufreduction = ctx->temp_buf + count * elem_sz / 2; //负责规约
-    int xorv=procn/2;
-    int step = count/2;
-    int send_startg=0;
+    void *bufreduction = ctx->temp_buf + count * elem_sz / 2; // 负责规约
+    int xorv = procn / 2;
+    int step = count / 2;
+    int send_startg = 0;
     int recv_startg = 0;
     MPI_Request reqs, reqr;
     for (int i = 0; i < steps; i++)
     {
         int dest = rank ^ xorv;
-        send_startg =recv_startg + ((dest & xorv) > 0 ? 1:0) * step;
-        recv_startg += ((rank & xorv) > 0 ? 1:0) * step;
+        send_startg = recv_startg + ((dest & xorv) > 0 ? 1 : 0) * step;
+        recv_startg += ((rank & xorv) > 0 ? 1 : 0) * step;
         void *sendbuffer;
-        if(i == 0)
+        if (i == 0)
         {
             sendbuffer = datasend + send_startg * elem_sz;
-        }else{
+        }
+        else
+        {
             sendbuffer = bufreduction + send_startg * elem_sz;
         }
-        void *recvbuffer =  buftmp + recv_startg * elem_sz;
+        void *recvbuffer = buftmp + recv_startg * elem_sz;
         MPI_Isend(sendbuffer, step * elem_sz, MPI_CHAR, dest, 0, MPI_COMM_WORLD, &reqs);
         MPI_Irecv(recvbuffer, step * elem_sz, MPI_CHAR, dest, 0, MPI_COMM_WORLD, &reqr);
         MPI_Wait(&reqs, MPI_STATUS_IGNORE);
         MPI_Wait(&reqr, MPI_STATUS_IGNORE);
 
-
-        //进行规约操作
-        // if(i == steps - 1)
-        // {
-        //     if(i == 0)
-        //         float_sum_abc(datasend + recv_startg * elem_sz, recvbuffer, datarecv, step);
-        //     else{
-        //         float_sum_abc(bufreduction + recv_startg * elem_sz ,recvbuffer, datarecv, step);
-        //     }
-        // }else
+        // 进行规约操作
+        //  if(i == steps - 1)
+        //  {
+        //      if(i == 0)
+        //          float_sum_abc(datasend + recv_startg * elem_sz, recvbuffer, datarecv, step);
+        //      else{
+        //          float_sum_abc(bufreduction + recv_startg * elem_sz ,recvbuffer, datarecv, step);
+        //      }
+        //  }else
         {
-            if(i == 0)
+            if (i == 0)
                 float_sum_abc((const float *)(datasend + recv_startg * elem_sz), recvbuffer, bufreduction + recv_startg * elem_sz, step);
-            else{
+            else
+            {
                 float_sum_abc(bufreduction + recv_startg * elem_sz, recvbuffer, bufreduction + recv_startg * elem_sz, step);
             }
         }
         // if(i == steps-1)
         // {
 
-        //     MPI_Allgather(bufreduction + recv_startg * elem_sz, step * elem_sz, MPI_CHAR, 
+        //     MPI_Allgather(bufreduction + recv_startg * elem_sz, step * elem_sz, MPI_CHAR,
         //                   datarecv, step * elem_sz, MPI_CHAR, MPI_COMM_WORLD);
         // }
         // if(ctx->global_rank == 1)
@@ -885,7 +918,6 @@ void Rabenseifner_reduce_scatter(const void *datasend, void *datarecv, int count
         step /= 2;
         xorv /= 2;
     }
-    
 }
 void *M_leader_reduce_scatter_1(void *sendbuf, int start, int elem_sz, int count, int *counts, int *starts, int procn, int rank, MPI_Comm comm, yhccl_op reduce_op)
 {
@@ -933,7 +965,7 @@ void *M_leader_reduce_scatter_1(void *sendbuf, int start, int elem_sz, int count
     MPI_Waitall(req_c, reqs_recv, status);
     MPI_Barrier(ctx->Comm_intra_node);
     // #endif
-    //多leader分片规约
+    // 多leader分片规约
     void *re = sendbuf + starts[rank] * elem_sz;
     int countre = counts[rank];
     int slice_size = 2048 / elem_sz;
@@ -983,6 +1015,7 @@ void *M_leader_allgather_1(void *sendbuf, void *recvbuf, int *counts, int *start
     MPI_Barrier(ctx->Comm_intra_node);
 }
 
+// 多leader的reducescatter （ring算法）
 void *M_leader_reduce_scatter_ring(void *sendbuf, int start, int elem_sz, int count, int *counts, int *starts, int procn, int rank, MPI_Comm comm, yhccl_op reduce_op)
 {
     yhccl_contexts *ctx = yhccl_contexts::_ctx;
@@ -1012,7 +1045,7 @@ extern "C" int mca_coll_yhccl_PJT_Allreduce_inter_alg = 1;
 
 template <typename T>
 void yhccl_sum_op1(const void *invec, void *inoutvec, int *len,
-                  MPI_Datatype *datatype = NULL)
+                   MPI_Datatype *datatype = NULL)
 {
     T *in = (T *)invec;
     T *inout = (T *)inoutvec;
@@ -1021,13 +1054,9 @@ void yhccl_sum_op1(const void *invec, void *inoutvec, int *len,
         inout[i] += in[i];
     }
 }
-
-
-
 void yhccl_allreduce(const void *datasend, void *datarecv, int count, MPI_Datatype mpitype, MPI_Op mpi_op, yhccl_op reducefp = 0)
 {
-    static int yhccl_allreduce_ct;
-    yhccl_allreduce_ct++;
+
     yhccl_contexts *ctx = yhccl_contexts::_ctx;
     // if (ctx->global_rank == 0)
     // {
@@ -1036,35 +1065,36 @@ void yhccl_allreduce(const void *datasend, void *datarecv, int count, MPI_Dataty
     int elem_sz = -1;
     MPI_Type_size(mpitype, &elem_sz);
 
-// #ifdef PJT_MPI
-//     // puts("pjt_mpi");
+    // #ifdef PJT_MPI
+    //     // puts("pjt_mpi");
 
-//     if (count * elem_sz <= 32768)
-//     {
-//         ctx->_opt.intra_node_reduce_type = REDUCE_BCAST;
-//     }
-//     else
-//         // if (count * elem_sz <= 131072)
-//         if (count * elem_sz <= 262144)
-//         {
+    //     if (count * elem_sz <= 32768)
+    //     {
+    //         ctx->_opt.intra_node_reduce_type = REDUCE_BCAST;
+    //     }
+    //     else
+    //         // if (count * elem_sz <= 131072)
+    //         if (count * elem_sz <= 262144)
+    //         {
 
-//             ctx->_opt.intra_node_reduce_type = CacheEfficient;
-//         }
-//         else
-//         {
-//             ctx->_opt.intra_node_reduce_type = MemoryEfficient;
-//         }
-// #endif
+    //             ctx->_opt.intra_node_reduce_type = CacheEfficient;
+    //         }
+    //         else
+    //         {
+    //             ctx->_opt.intra_node_reduce_type = MemoryEfficient;
+    //         }
+    // #endif
     {
+        if (datasend == MPI_IN_PLACE)
+            datasend = datarecv;
+        // puts("enter 685 yhccl");
+        yhccl_op reduce_op = 0;
 
         if (count * elem_sz < 2048)
         {
-            if (0)
+            // if (0)
             {
-                if (datasend == MPI_IN_PLACE)
-                    PMPI_Reduce(MPI_IN_PLACE, datarecv, count, mpitype, mpi_op, 0, ctx->Comm_intra_node);
-                else 
-                    PMPI_Reduce(datasend, datarecv, count, mpitype, mpi_op, 0, ctx->Comm_intra_node);
+                PMPI_Reduce(datasend, datarecv, count, mpitype, mpi_op, 0, ctx->Comm_intra_node);
                 if (ctx->intra_node_rank == 0)
                 {
 #ifdef PJT_MPI
@@ -1084,63 +1114,52 @@ void yhccl_allreduce(const void *datasend, void *datarecv, int count, MPI_Dataty
         }
         // if (ctx->_opt.intra_node_reduce_type == MIXED)
 
-    // if(ctx->intra_node_rank == 0)
-
-
         if (count * elem_sz <= 2048)
         {
-                PMPI_Allreduce(datasend, datarecv, count, mpitype, mpi_op, ctx->Comm_global);
-                return;
+            PMPI_Allreduce(datasend, datarecv, count, mpitype, mpi_op, ctx->Comm_global);
+            return;
         }
         else
         {
+            // SC23 NT部分 自适应NT适用的消息大小
             ctx->_opt.NT_boundary_msg_sz = (256 * 1024 * 1024 + ctx->intra_node_procn * 512 * 1024 - ctx->intra_node_procn * ctx->_opt.intra_node_reduce_byte_unit * 2) / (2 * ctx->intra_node_procn);
-            // AMD 7H12
-            size_t L2_sz_per_core = 63.5 * 1024 * 1024 / 64;
-            size_t two_socket_L3_sz = 2 * 512 * 1024 * 1024;
-            ctx->_opt.NT_boundary_msg_sz = (two_socket_L3_sz + ctx->intra_node_procn * L2_sz_per_core - ctx->intra_node_procn * ctx->_opt.intra_node_reduce_byte_unit * 2) / (2 * ctx->intra_node_procn);
-            // if(ctx->global_rank == 0)
-            // {
-            //     printf("ctx->_opt.NT_boundary_msg_sz=%ld\n", ctx->_opt.NT_boundary_msg_sz); //2x AMD 7H12 = 4583424
-            // }
+            // NX
             //  ctx->_opt.NT_boundary_msg_sz = (66 * 1024 * 1024 + ctx->intra_node_procn * 1024 * 1024 - ctx->intra_node_procn * ctx->_opt.intra_node_reduce_byte_unit * 2) / (2 * ctx->intra_node_procn);
             //  4194304;
             //  4194304;
             //  if (count * elem_sz <= 131072)
-            // if (0)
-            // if (ctx->_opt.using_non_temporal == 1)
-            if (count * elem_sz <= 0)
-            {
-                // PMPI_Allreduce(datasend, datarecv, count, mpitype, mpi_op, ctx->Comm_global);
-                // return;
-                // MPI_Barrier(ctx->Comm_intra_node);
-                // if (ctx->intra_node_rank == 0)
-                // {
-                //     puts("======================cache Efficient======================");
-                //     fflush(stdout);
-                // }
-                ctx->_opt.intra_node_reduce_type = REDUCE_BCAST;
-                ctx->_opt.numa_n = 2;
-                ctx->_opt.core_per_numa = ctx->intra_node_procn / ctx->_opt.numa_n;
-                ctx->_opt.using_non_temporal = 0;
-            }
-            else if (count * elem_sz < ctx->_opt.NT_boundary_msg_sz * 0.9)
-            {
-                // MPI_Barrier(ctx->Comm_intra_node);
-                // if (ctx->intra_node_rank == 0)
-                //     puts("======================MemoryEfficient Efficient======================");
-                ctx->_opt.intra_node_reduce_type = MemoryEfficient;
-                ctx->_opt.using_non_temporal = 0;
-                ctx->_opt.numa_n = 2;
-                ctx->_opt.core_per_numa = ctx->intra_node_procn / ctx->_opt.numa_n;
-            }
-            else
-            {
-                ctx->_opt.intra_node_reduce_type = MemoryEfficient;
-                ctx->_opt.using_non_temporal = 1;
-                ctx->_opt.numa_n = 2;
-                ctx->_opt.core_per_numa = ctx->intra_node_procn / ctx->_opt.numa_n;
-            }
+            //  if(0)
+            if (ctx->_opt.using_non_temporal == 1)
+                if (count * elem_sz <= 131072)
+                {
+                    // MPI_Barrier(ctx->Comm_intra_node);
+                    // if (ctx->intra_node_rank == 0)
+                    // {
+                    //     puts("======================cache Efficient======================");
+                    //     fflush(stdout);
+                    // }
+                    ctx->_opt.intra_node_reduce_type = CacheEfficient;
+                    ctx->_opt.core_per_numa = ctx->intra_node_procn / 4;
+                    ctx->_opt.numa_n = 4;
+                    ctx->_opt.using_non_temporal = 0;
+                }
+                else
+                {
+                    // MPI_Barrier(ctx->Comm_intra_node);
+                    // if (ctx->intra_node_rank == 0)
+                    //     puts("======================MemoryEfficient Efficient======================");
+                    ctx->_opt.intra_node_reduce_type = MemoryEfficient;
+                    if (count * elem_sz < ctx->_opt.NT_boundary_msg_sz)
+                    {
+                        ctx->_opt.using_non_temporal = 0;
+                    }
+                    else
+                    {
+                        ctx->_opt.using_non_temporal = 1;
+                    }
+                    ctx->_opt.core_per_numa = ctx->intra_node_procn / 2;
+                    ctx->_opt.numa_n = 2;
+                }
         }
         // ctx->_opt.intra_node_reduce_type = CacheEfficient;
         // ctx->_opt.intra_node_reduce_type = MemoryEfficient;
@@ -1149,159 +1168,153 @@ void yhccl_allreduce(const void *datasend, void *datarecv, int count, MPI_Dataty
         // else{
         //     reduce_op = yhccl_sum_op1<float>;
         // }
+        reduce_op = operation_switch(mpitype, mpi_op, reducefp);
 
-        yhccl_op reduce_op = operation_switch(mpitype, mpi_op, reducefp);
-
-        // 更具消息大小和节点数量进行规约;目前主要着眼于大消息
+        // 根据消息大小和节点数量进行规约;目前主要着眼于大消息
         // 针对每节点多个进程的hierarchy mulit-leader allreduce.
         // 十分适用于深度学习应用
         //  copy data to shared memory
         //  MPI_Barrier(ctx->Comm_intra_node);
-
-        if (datasend == MPI_IN_PLACE)
-            datasend = datarecv;
-        
         switch (ctx->_opt.mulit_leader_algorithm)
         {
         case DPML:
         {
-                // puts("DPML");
-                int starts_intra_node[ctx->intra_node_procn];
-                int counts_intra_node[ctx->intra_node_procn];
-                if (ctx->intra_node_procn > 1)
-                {
-                    switch (ctx->_opt.intra_node_reduce_type)
-                    {
-                    case CacheEfficient:
-                        memcpy(ctx->larger_msg_allreduce_my_sendbuf, datasend, count * elem_sz);
-                        Reduce_intra_node_onSHM(count, elem_sz, reduce_op, counts_intra_node, starts_intra_node);
-                        break;
-                    case MemoryEfficient:
-                        // puts("516");
-                        Reduce_intra_node(datasend, count, elem_sz, reduce_op, counts_intra_node, starts_intra_node);
-                        MPI_Barrier(ctx->Comm_intra_node);
-                        break;
-                    }
-                }
-                else
-                    memcpy(ctx->larger_msg_allreduce_result_start_0, datasend, count * elem_sz);
-                void *sendb = ctx->larger_msg_allreduce_result_start_0 + starts_intra_node[ctx->intra_node_rank] * elem_sz;
-                int countl = counts_intra_node[ctx->intra_node_rank];
-                if (ctx->inter_node_procn > 0)
-                {
-                    MPI_Request req;
-                    MPI_Status status;
-                    // MPI_Allreduce(MPI_IN_PLACE, sendb, countl, mpitype, mpi_op, ctx->Comm_inter_node);
-    #ifdef Inter_node_allreduce
-                    // while (1)
-                    {
-
-                        MPI_Allreduce(MPI_IN_PLACE, sendb, countl, mpitype, mpi_op, ctx->Comm_inter_node);
-                        // MPI_Iallreduce(MPI_IN_PLACE, sendb, countl, mpitype, mpi_op, ctx->Comm_inter_node, &req);
-                        // MPI_Wait(&req, &status);
-                    }
-    #endif
-                    MPI_Barrier(ctx->Comm_intra_node);
-                }
-    #ifdef Intra_node_bcast
-                switch (ctx->_opt.intra_node_bcast_type)
-                {
-                case intra_node_bcast::MEMCPY:
-                    memcpy(datarecv, ctx->larger_msg_allreduce_result_start_0, count * elem_sz);
-                    break;
-                case intra_node_bcast::CacheEfficientBcast:
-                    Bcast_intra_node_memory_efficient(ctx->larger_msg_allreduce_result_start_0, count, elem_sz, datarecv);
-                    break;
-                default:
-                    break;
-                }
-    #endif
-                MPI_Barrier(ctx->Comm_intra_node);
-                break;
-            }
-            case PIPELINED_DPML:
+            // puts("DPML");
+            int starts_intra_node[ctx->intra_node_procn];
+            int counts_intra_node[ctx->intra_node_procn];
+            if (ctx->intra_node_procn > 1)
             {
-                // puts("PIPELINED_DPML");
-                int starts_intra_node[ctx->intra_node_procn];
-                int counts_intra_node[ctx->intra_node_procn];
                 switch (ctx->_opt.intra_node_reduce_type)
                 {
                 case CacheEfficient:
-                    // puts("693");
-                    // if (ctx->_opt.open_intra_node_communication == 1)
-
-                    memmove(ctx->larger_msg_allreduce_my_sendbuf, datasend, count * elem_sz);
-                    MPI_Barrier(ctx->Comm_intra_node);
-                    pipelined_dpml_cache_efficient(count, elem_sz, reduce_op, counts_intra_node, starts_intra_node, mpitype, mpi_op);
-                    MPI_Barrier(ctx->Comm_intra_node);
+                    memcpy(ctx->larger_msg_allreduce_my_sendbuf, datasend, count * elem_sz);
+                    Reduce_intra_node_onSHM(count, elem_sz, reduce_op, counts_intra_node, starts_intra_node);
                     break;
                 case MemoryEfficient:
-                    if (ctx->intra_node_rank == 0)
-                    {
-                        //清理所有内存标志。
-                        int ct = 128 + count * elem_sz / ctx->_opt.intra_node_reduce_byte_unit;
-                        memset(ctx->allreduce_flags, 0, ct * sizeof(unsigned long long));
-                    }
+                    // puts("516");
+                    Reduce_intra_node(datasend, count, elem_sz, reduce_op, counts_intra_node, starts_intra_node);
                     MPI_Barrier(ctx->Comm_intra_node);
-                    pipelined_dpml_memory_efficient(datasend, count, elem_sz, reduce_op, counts_intra_node, starts_intra_node, mpitype, mpi_op);
-                    MPI_Barrier(ctx->Comm_intra_node);
-                    if (ctx->intra_node_rank == 0)
-                    {
-                        //清理所有内存标志。
-                        int ct = 128 + count * elem_sz / ctx->_opt.intra_node_reduce_byte_unit;
-                        memset(ctx->allreduce_flags, 0, ct * sizeof(unsigned long long));
-                    }
-                    break;
-                default:
                     break;
                 }
-    #ifdef Intra_node_bcast
+            }
+            else
+                memcpy(ctx->larger_msg_allreduce_result_start_0, datasend, count * elem_sz);
+            void *sendb = ctx->larger_msg_allreduce_result_start_0 + starts_intra_node[ctx->intra_node_rank] * elem_sz;
+            int countl = counts_intra_node[ctx->intra_node_rank];
+            if (ctx->inter_node_procn > 0)
+            {
+                MPI_Request req;
+                MPI_Status status;
+                // MPI_Allreduce(MPI_IN_PLACE, sendb, countl, mpitype, mpi_op, ctx->Comm_inter_node);
+#ifdef Inter_node_allreduce
+                // while (1)
+                {
 
-                // if (ctx->_opt.open_intra_node_communication == 1)
-                // if (ctx->global_rank == 0)
-                    switch (ctx->_opt.intra_node_bcast_type)
-                    {
-                    case intra_node_bcast::MEMCPY:
-                        memcpy(datarecv, ctx->larger_msg_allreduce_result_start_0, count * elem_sz);
-                        break;
-                    case intra_node_bcast::CacheEfficientBcast:
-                        Bcast_intra_node_memory_efficient(ctx->larger_msg_allreduce_result_start_0, count, elem_sz, datarecv);
-                        break;
-                    default:
-                        break;
-                    }
-    #endif
-                // MPI_Barrier(ctx->Comm_intra_node);
-                break;
+                    MPI_Allreduce(MPI_IN_PLACE, sendb, countl, mpitype, mpi_op, ctx->Comm_inter_node);
+                    // MPI_Iallreduce(MPI_IN_PLACE, sendb, countl, mpitype, mpi_op, ctx->Comm_inter_node, &req);
+                    // MPI_Wait(&req, &status);
+                }
+#endif
+                MPI_Barrier(ctx->Comm_intra_node);
             }
-            case MEMORY_BANDWIDTH_EFFICIENT:
+#ifdef Intra_node_bcast
+            switch (ctx->_opt.intra_node_bcast_type)
             {
-                //  puts("MEMORY_BANDWIDTH_EFFICIENT");
-                pjt_memory_bandwidth_efficient_allreduce(datasend, datarecv, count, elem_sz, mpitype, mpi_op, reduce_op);
+            case intra_node_bcast::MEMCPY:
+                memcpy(datarecv, ctx->larger_msg_allreduce_result_start_0, count * elem_sz);
                 break;
-            }
-            case INTEL_RG:
-            {
-                intel_rg_all_reduce(datasend, datarecv, count, elem_sz, mpi_op, reduce_op);
+            case intra_node_bcast::CacheEfficientBcast:
+                Bcast_intra_node_memory_efficient(ctx->larger_msg_allreduce_result_start_0, count, elem_sz, datarecv);
                 break;
-            }
-            case RING_AR:
-            {
-                pjt_ring_all_reduce(datasend, datarecv, count, elem_sz, mpi_op, reduce_op);
-                break;
-            }
-            case R_ALL_REDUCE:
-            {
-                Rabenseifner_reduce_scatter(datasend, datarecv, count, elem_sz, mpi_op, reduce_op);
-                break;
-            }
-                // case Pipeline_M_Leader:
-                //     break;
             default:
                 break;
             }
-            // {
+#endif
+            MPI_Barrier(ctx->Comm_intra_node);
+            break;
+        }
+        case PIPELINED_DPML:
+        {
+            // puts("PIPELINED_DPML");
+            int starts_intra_node[ctx->intra_node_procn];
+            int counts_intra_node[ctx->intra_node_procn];
+            switch (ctx->_opt.intra_node_reduce_type)
+            {
+            case CacheEfficient:
+                // puts("693");
+                // if (ctx->_opt.open_intra_node_communication == 1)
 
+                memmove(ctx->larger_msg_allreduce_my_sendbuf, datasend, count * elem_sz);
+                MPI_Barrier(ctx->Comm_intra_node);
+                pipelined_dpml_cache_efficient(count, elem_sz, reduce_op, counts_intra_node, starts_intra_node, mpitype, mpi_op);
+                MPI_Barrier(ctx->Comm_intra_node);
+                break;
+            case MemoryEfficient:
+                if (ctx->intra_node_rank == 0)
+                {
+                    // 清理所有内存标志。
+                    int ct = 128 + count * elem_sz / ctx->_opt.intra_node_reduce_byte_unit;
+                    memset(ctx->allreduce_flags, 0, ct * sizeof(unsigned long long));
+                }
+                MPI_Barrier(ctx->Comm_intra_node);
+                pipelined_dpml_memory_efficient(datasend, count, elem_sz, reduce_op, counts_intra_node, starts_intra_node, mpitype, mpi_op);
+                MPI_Barrier(ctx->Comm_intra_node);
+                if (ctx->intra_node_rank == 0)
+                {
+                    // 清理所有内存标志。
+                    int ct = 128 + count * elem_sz / ctx->_opt.intra_node_reduce_byte_unit;
+                    memset(ctx->allreduce_flags, 0, ct * sizeof(unsigned long long));
+                }
+                break;
+            default:
+                break;
+            }
+#ifdef Intra_node_bcast
+
+            // if (ctx->_opt.open_intra_node_communication == 1)
+            // if (ctx->global_rank == 0)
+            switch (ctx->_opt.intra_node_bcast_type)
+            {
+            case intra_node_bcast::MEMCPY:
+                memcpy(datarecv, ctx->larger_msg_allreduce_result_start_0, count * elem_sz);
+                break;
+            case intra_node_bcast::CacheEfficientBcast:
+                Bcast_intra_node_memory_efficient(ctx->larger_msg_allreduce_result_start_0, count, elem_sz, datarecv);
+                break;
+            default:
+                break;
+            }
+#endif
+            // MPI_Barrier(ctx->Comm_intra_node);
+            break;
+        }
+        case MEMORY_BANDWIDTH_EFFICIENT:
+        {
+            //  puts("MEMORY_BANDWIDTH_EFFICIENT");
+            pjt_memory_bandwidth_efficient_allreduce(datasend, datarecv, count, elem_sz, mpitype, mpi_op, reduce_op);
+            break;
+        }
+        case INTEL_RG:
+        {
+            intel_rg_all_reduce(datasend, datarecv, count, elem_sz, mpi_op, reduce_op);
+            break;
+        }
+        case RING_AR:
+        {
+            pjt_ring_all_reduce(datasend, datarecv, count, elem_sz, mpi_op, reduce_op);
+            break;
+        }
+        case R_ALL_REDUCE:
+        {
+            Rabenseifner_reduce_scatter(datasend, datarecv, count, elem_sz, mpi_op, reduce_op);
+            break;
+        }
+            // case Pipeline_M_Leader:
+            //     break;
+        default:
+            break;
+        }
+        // {
         //     //第一步是节点内规约,将数据放入到result_start_0上
         //     int starts_intra_node[ctx->intra_node_procn];
         //     int counts_intra_node[ctx->intra_node_procn];
@@ -1311,7 +1324,6 @@ void yhccl_allreduce(const void *datasend, void *datarecv, int count, MPI_Dataty
         //     }
         //     else
         //         memcpy(ctx->larger_msg_allreduce_result_start_0, datasend, count * elem_sz);
-
         //     if (ctx->mulit_leader_option == M_LEADER_spread)
         //     {
         //         // puts("212");
@@ -1327,7 +1339,6 @@ void yhccl_allreduce(const void *datasend, void *datarecv, int count, MPI_Dataty
         //             re = M_leader_reduce_scatter_1(ctx->larger_msg_allreduce_result_start_0, 0, elem_sz, count,
         //                                            counts_inter_node, starts_inter_node,
         //                                            ctx->intra_zni_procn, ctx->intra_zni_rank, ctx->Comm_intra_zni, reduce_op);
-
         //             M_leader_allgather_1(re, ctx->larger_msg_allreduce_result_start_0,
         //                                  counts_inter_node, starts_inter_node, elem_sz,
         //                                  ctx->intra_zni_procn, ctx->intra_zni_rank, ctx->Comm_intra_zni);
@@ -1341,7 +1352,6 @@ void yhccl_allreduce(const void *datasend, void *datarecv, int count, MPI_Dataty
         //         MPI_Allreduce(MPI_IN_PLACE, sendb, countl, mpitype, mpi_op, ctx->Comm_inter_node);
         //         MPI_Barrier(ctx->Comm_intra_node);
         //     }
-
         //     //然后是广播过程
         //     memcpy(datarecv, ctx->larger_msg_allreduce_result_start_0, count * elem_sz);
         //     MPI_Barrier(ctx->Comm_intra_node);
